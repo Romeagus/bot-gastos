@@ -20,6 +20,10 @@ registro financiero diario mediante:
    botones: vos elegís cuál tocar, el bot nunca adivina.
 9. **Resumen semanal automático** — todos los lunes a las 10:00 (hora de Argentina)
    te escribe cómo viene el mes y cómo están tus topes, sin que tengas que pedirlo.
+10. **Exportación a CSV** — `/exportar` te manda todos tus gastos como archivo, listo
+    para abrir en Excel y analizarlo.
+11. **Errores con código** — si algo falla, el mensaje incluye un código (`E-6TRP`) y
+    `/error` muestra los últimos. Se puede diagnosticar sin leer los logs del servidor.
 
 > Estado actual: **MVP funcional.** Registro (texto / audio / foto), consultas,
 > topes con alertas, categorías propias, varias instrucciones por mensaje, borrado
@@ -41,11 +45,44 @@ registro financiero diario mediante:
 | Borrar un gasto     | `/borrar` (te lista los últimos con botones) · `borrá el último`       |
 | Corregir un gasto   | `/editar` (elegís el gasto y el campo: monto o categoría)              |
 | Ver el resumen      | `/resumen` (o esperás al lunes y te lo manda solo)                     |
+| Bajar los gastos    | `/exportar` (te llega un `.csv` listo para Excel)                      |
+| Ver si algo falló   | `/error` (códigos de los últimos errores)                              |
 | Empezar de cero     | `/reset` (borra todo pidiendo confirmación)                            |
 
 **Todo esto funciona igual por texto que por audio.** Comandos disponibles:
 `/start`, `/help`, `/resumen`, `/presupuesto`, `/categoria`, `/borrar`, `/editar`,
-`/reset`.
+`/exportar`, `/error`, `/reset`.
+
+### Exportar a CSV
+
+`/exportar` te manda un archivo `gastos-AAAA-MM-DD.csv` con **todos** tus gastos.
+Cuatro detalles que hacen que se abra bien en Excel:
+
+- **Separador `;`**: en es-AR la coma es el separador decimal. Con coma de columna,
+  Excel con configuración regional argentina abre el archivo partido al medio.
+- **BOM UTF-8**: sin él, "Peluquería" aparece como "PeluquerÃ­a".
+- **Sin emoji en la categoría**: "🍔 Comida" no agrupa con "Comida" al filtrar.
+- **Montos como números** (`8000`, no `$8.000`): para que la planilla los sume.
+
+Se excluyen los gastos que borraste (`rejected`): exportar también lo que ya no
+existe daría una contabilidad que no es real.
+
+### Cuando algo falla
+
+El mensaje de error incluye un código corto:
+
+```
+No pude procesar el audio 🙈
+
+Grabalo de nuevo y pruebo otra vez 🎙️
+
+Si sigue pasando, contame el código E-6TRP.
+```
+
+Con `/error` ves los últimos. El código se **deriva del mensaje del error**, así que
+el mismo fallo siempre tiene el mismo código y se puede buscar en los logs sin
+ambigüedad. Si el guardado del error falla, el log del servidor igual queda escrito:
+perder un registro es mejor que romper el manejo de errores.
 
 ### El resumen semanal
 
@@ -125,6 +162,7 @@ bot-gastos/
 │  │  ├─ handlers/               # un archivo por comando/mensaje + shared.ts
 │  │  ├─ middlewares/            # auth por usuario, logging, manejo de errores
 │  │  ├─ pending-edit.ts         # edición en curso (expira a los 5 min)
+│  │  ├─ reply-error.ts          # error al usuario + código de registro
 │  │  └─ keyboards/              # (reservado)
 │  ├─ jobs/
 │  │  └─ weekly-report.job.ts    # resumen semanal (lunes 10:00, zona del usuario)
@@ -141,6 +179,8 @@ bot-gastos/
 │  │  ├─ categories.service.ts   # resolución de categorías (alias + propias)
 │  │  ├─ queries.service.ts      # consultas en lenguaje natural
 │  │  ├─ weekly-report.service.ts# texto del resumen semanal (lo usa /resumen)
+│  │  ├─ export.service.ts       # CSV de gastos (lo usa /exportar)
+│  │  ├─ diagnostics.service.ts  # códigos de error visibles (E-XXXX)
 │  │  └─ answer.ts               # respuesta (texto + botones) sin Telegraf
 │  ├─ db/
 │  │  ├─ client.ts               # Pool de conexiones (pg)

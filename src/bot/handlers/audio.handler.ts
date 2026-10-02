@@ -11,6 +11,7 @@ import type { Context, Telegraf } from 'telegraf';
 import { transcribeAudio } from '../../services/ai/transcription.service.js';
 import { AiProviderError } from '../../utils/errors.js';
 import { createLogger } from '../../utils/logger.js';
+import { replyWithError } from '../reply-error.js';
 import { handleFreeText, resolveUser } from './shared.js';
 
 const log = createLogger('bot:audio');
@@ -52,22 +53,30 @@ async function handleAudio(
   audio: TelegramAudio,
   messageId: number,
 ): Promise<void> {
+  // Se declaran FUERA del try porque el catch los usa para registrar el error.
+  // Si el `resolveUser` falla, el id queda en null y el reporte se guarda igual.
+  let userId: string | null = null;
+  let bytes = 0;
+  let mimeType = 'audio/ogg';
+
   try {
     const user = await resolveUser(ctx);
     if (user === null) {
       await ctx.reply('No pude identificarte 😅 Probá de nuevo.');
       return;
     }
+    userId = user.id;
 
-    const mimeType = audio.mime_type ?? 'audio/ogg';
+    mimeType = audio.mime_type ?? 'audio/ogg';
     const fileLink = await ctx.telegram.getFileLink(audio.file_id);
     const download = await fetch(fileLink);
-    const bytes = new Uint8Array(await download.arrayBuffer());
+    const audioBytes = new Uint8Array(await download.arrayBuffer());
+    bytes = audioBytes.length;
 
-    log.debug('Audio descargado', { bytes: bytes.length, mimeType });
+    log.debug('Audio descargado', { bytes: bytes, mimeType });
 
     const text = await transcribeAudio({
-      audio: bytes,
+      audio: audioBytes,
       filename: `audio.${extensionFor(mimeType)}`,
       mimeType,
       language: toIsoLanguage(user.languageCode),
@@ -85,19 +94,16 @@ async function handleAudio(
     // El `detail` trae la respuesta cruda del proveedor: es lo que permite
     // diagnosticar (ej. "invalid file format"). Antes no se logueaba.
     if (error instanceof AiProviderError) {
-      log.error('Fallo la transcripcion', {
-        status: error.status,
-        detail: error.detail,
-        error: error.message,
+      await replyWithError(ctx, userId, 'audio', error, {
+        context: `transcripcion (${bytes} bytes, ${mimeType})`,
+        extra: 'Grabalo de nuevo y pruebo otra vez 🎙️',
       });
-      await ctx.reply('No pude escuchar bien el audio 😔 Probá de nuevo en un momento.');
       return;
     }
 
-    log.error('Fallo el handler de audio', {
-      error: error instanceof Error ? error.message : String(error),
+    await replyWithError(ctx, userId, 'audio', error, {
+      extra: 'Probá de nuevo en un momento.',
     });
-    await ctx.reply('Uhh, algo se me rompió con el audio 🙈 Probá de nuevo en un momento.');
   }
 }
 

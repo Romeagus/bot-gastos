@@ -44,6 +44,18 @@ export async function categoryLabelMap(userId: string): Promise<Map<string, stri
 }
 
 /**
+ * Mapa `categoryId` -> NOMBRE, sin emoji ('Supermercado').
+ *
+ * Existe aparte de `categoryLabelMap` porque el emoji va bien en el chat pero
+ * estorba en una planilla: en un CSV cada columna debe poder filtrarse y
+ * agruparse, y "🍔 Comida" no agrupa con "Comida".
+ */
+export async function categoryNameMap(userId: string): Promise<Map<string, string>> {
+  const categories = await listForUser(userId);
+  return new Map(categories.map((category) => [category.id, category.name]));
+}
+
+/**
  * Slugs con los que la IA puede clasificar un gasto de este usuario.
  * Incluye las categorias propias: asi "gasté 8000 en el gimnasio" puede caer
  * en la categoria del usuario en lugar de en "varios".

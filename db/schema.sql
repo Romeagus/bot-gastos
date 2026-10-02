@@ -243,6 +243,43 @@ CREATE INDEX IF NOT EXISTS scheduled_reports_lookup_idx
   ON scheduled_reports (job_name, period_key);
 
 -- =============================================================================
+-- Tabla: error_reports
+-- -----------------------------------------------------------------------------
+-- Errores que el usuario YA vio en su chat ("no pude interpretar eso", "se me
+-- rompió"), guardados con su codigo.
+--
+-- Por que existe: el unico rastro de un fallo hoy es el log del servidor, que
+-- el usuario no va a leer. Si alguien reporta "no me anda", sin esto no hay forma
+-- de saber que fallo ni cuando. Con el codigo se puede buscar el error exacto.
+--
+-- No se guardan secretos ni el token: solo el mensaje, el tipo y de donde vino.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS error_reports (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Codigo corto y legible que se le muestra al usuario para que lo reporte.
+  code        TEXT        NOT NULL,
+  user_id     UUID        REFERENCES users(id) ON DELETE SET NULL,
+  -- Origen: 'text' | 'audio' | 'photo' | 'command' | 'job' | 'unknown'.
+  source      TEXT        NOT NULL DEFAULT 'unknown',
+  -- Mensaje tecnico del error (el que va al log).
+  message     TEXT        NOT NULL,
+  -- Contexto minimo para diagnosticar: que se estaba procesando.
+  context     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT error_reports_code_key UNIQUE (code),
+  CONSTRAINT error_reports_source_chk
+    CHECK (source IN ('text', 'audio', 'photo', 'command', 'job', 'unknown'))
+);
+
+COMMENT ON TABLE  error_reports          IS 'Errores visibles para el usuario, con codigo para poder rastrearlos.';
+COMMENT ON COLUMN error_reports.code    IS 'Codigo corto que se muestra al usuario (ej. E-7F3A).';
+
+-- Consulta tipica: "que errores vio este usuario ultimamente".
+CREATE INDEX IF NOT EXISTS error_reports_user_created_idx
+  ON error_reports (user_id, created_at DESC);
+
+-- =============================================================================
 -- Triggers: mantenimiento automático de updated_at.
 -- =============================================================================
 DROP TRIGGER IF EXISTS users_set_updated_at ON users;

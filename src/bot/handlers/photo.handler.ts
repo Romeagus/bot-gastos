@@ -18,8 +18,9 @@ import {
   extractExpenseFromImage,
   isVisionConfigured,
 } from '../../services/ai/vision.service.js';
-import { AiProviderError, AppError } from '../../utils/errors.js';
+import { AppError } from '../../utils/errors.js';
 import { createLogger } from '../../utils/logger.js';
+import { replyWithError } from '../reply-error.js';
 import { replyExpensePending, resolveUser } from './shared.js';
 
 const log = createLogger('bot:photo');
@@ -37,12 +38,19 @@ export function registerPhotoHandler(bot: Telegraf): void {
       return;
     }
 
+    // Se declaran FUERA del try porque el catch los necesita para registrar el
+    // error. Si fallara el `resolveUser` (y no pudiéramos identificar a quien
+    // escribe), el id queda en null y el reporte se guarda igual, sin usuario.
+    let userId: string | null = null;
+    let bytes = 0;
+
     try {
       const user = await resolveUser(ctx);
       if (user === null) {
         await ctx.reply('No pude identificarte 😅 Probá de nuevo.');
         return;
       }
+      userId = user.id;
 
       // Telegram envia varias resoluciones: la ultima es la mas grande.
       const photos = ctx.message.photo;
@@ -54,10 +62,11 @@ export function registerPhotoHandler(bot: Telegraf): void {
 
       const fileLink = await ctx.telegram.getFileLink(largest.file_id);
       const download = await fetch(fileLink);
-      const bytes = new Uint8Array(await download.arrayBuffer());
+      const imageBytes = new Uint8Array(await download.arrayBuffer());
+      bytes = imageBytes.length;
 
       const parsed = await extractExpenseFromImage({
-        image: bytes,
+        image: imageBytes,
         mimeType: 'image/jpeg',
         today: new Date().toISOString().slice(0, 10),
         defaultCurrency: user.currency,
@@ -87,26 +96,18 @@ export function registerPhotoHandler(bot: Telegraf): void {
         ctx.message.message_id,
       );
     } catch (error) {
-      if (error instanceof AiProviderError) {
-        log.error('Fallo la extraccion del ticket', {
-          status: error.status,
-          detail: error.detail,
-          error: error.message,
-        });
-        await ctx.reply('No pude leer el ticket 😔 Probá de nuevo en un momento.');
-        return;
-      }
-
+      // `AppError` = vision no configurada: no es un fallo, es una advertencia,
+      // asi que se responde con su mensaje y sin registrar nada.
       if (error instanceof AppError) {
         log.warn('Vision no disponible', { error: error.message });
         await ctx.reply(error.message);
         return;
       }
 
-      log.error('Fallo el handler de foto', {
-        error: error instanceof Error ? error.message : String(error),
+      await replyWithError(ctx, userId, 'photo', error, {
+        context: `vision (${bytes} bytes)`,
+        extra: 'Fijate que se vea el TOTAL del ticket, o escribímelo a mano.',
       });
-      await ctx.reply('Uhh, algo se me rompió con la imagen 🙈 Probá de nuevo en un momento.');
     }
   });
 }

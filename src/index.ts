@@ -74,6 +74,8 @@ async function main(): Promise<void> {
     { command: 'categoria', description: 'Ver o crear categorias' },
     { command: 'borrar', description: 'Borrar un gasto' },
     { command: 'editar', description: 'Corregir un gasto' },
+    { command: 'exportar', description: 'Descargar tus gastos en CSV' },
+    { command: 'error', description: 'Ver los ultimos errores' },
     { command: 'reset', description: 'Empezar de cero' },
   ]);
 

@@ -12,6 +12,8 @@ import { registerAudioHandler } from './audio.handler.js';
 import { registerBudgetHandler } from './budget.handler.js';
 import { registerCategoryHandler } from './category.handler.js';
 import { registerConfirmHandler } from './confirm.handler.js';
+import { registerErrorHandler } from './error.handler.js';
+import { registerExportHandler } from './export.handler.js';
 import { registerHelpHandler } from './help.handler.js';
 import { registerManageHandler } from './manage.handler.js';
 import { registerPhotoHandler } from './photo.handler.js';
@@ -28,6 +30,8 @@ export function registerHandlers(bot: Telegraf): void {
   registerConfirmHandler(bot);
   registerManageHandler(bot);
   registerSummaryHandler(bot);
+  registerExportHandler(bot);
+  registerErrorHandler(bot);
   registerTextHandler(bot);
   registerAudioHandler(bot);
   registerPhotoHandler(bot);

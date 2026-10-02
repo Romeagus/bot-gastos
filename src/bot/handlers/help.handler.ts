@@ -32,6 +32,8 @@ export const HELP_TEXT = [
   '  /categoria   - ver o crear categorías',
   '  /borrar      - borrar un gasto',
   '  /editar      - corregir un gasto',
+  '  /exportar    - bajar todos tus gastos en CSV (Excel)',
+  '  /error       - ver los últimos errores que tuviste',
   '  /reset       - empezar de cero',
   '  /help        - esta ayuda',
 ].join('\n');

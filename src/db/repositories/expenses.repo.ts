@@ -233,6 +233,25 @@ export async function listRecentByUser(userId: string, limit = 10): Promise<Expe
 }
 
 /**
+ * Todos los gastos vigentes del usuario, para la exportacion a CSV.
+ *
+ * A diferencia de `listRecentByUser`, NO lleva limite: el objetivo es sacar la
+ * cuenta completa. Se excluyen los `rejected` porque exportar tambien lo que el
+ * usuario borro daria una contabilidad que no existe.
+ */
+export async function listAllByUser(userId: string): Promise<Expense[]> {
+  const { rows } = await query<ExpenseRow>(
+    `SELECT ${EXPENSE_COLUMNS}
+       FROM expenses
+      WHERE user_id = $1
+        AND status <> 'rejected'
+      ORDER BY spent_at DESC, created_at DESC`,
+    [userId],
+  );
+  return rows.map(toExpense);
+}
+
+/**
  * Total gastado por categoria en un rango de fechas. Lo consumen las alertas
  * de presupuesto y las consultas en lenguaje natural.
  */
