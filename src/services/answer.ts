@@ -18,6 +18,26 @@ export interface Answer {
   readonly text: string;
   /** Filas de botones. Si falta, se responde sin teclado. */
   readonly buttons?: readonly (readonly AnswerButton[])[];
+  /**
+   * Archivo a enviar en lugar de (o ademas de) un texto.
+   *
+   * Lo usa la exportacion a CSV: el contenido va como `Buffer` y NO se toca el
+   * sistema de archivos, porque el bot corre en un contenedor efimero donde
+   * escribir un archivo y volver a leerlo es una carrera sin sentido.
+   *
+   * OJO: va aparte de `buttons` a proposito. En Telegram un mensaje con teclado
+   * inline y un documento a la vez se renderiza raro, asi que el handler elige
+   * uno u otro.
+   */
+  readonly document?: AnswerDocument;
+}
+
+/** Archivo listo para enviar por Telegram. */
+export interface AnswerDocument {
+  /** Nombre con extension (ej. 'gastos-2026-10-02.csv'). */
+  readonly filename: string;
+  /** Contenido crudo del archivo. */
+  readonly content: Buffer;
 }
 
 /** Boton de accion (azucar sintactica para no repetir el objeto). */

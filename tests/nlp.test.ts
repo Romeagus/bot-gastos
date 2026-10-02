@@ -15,11 +15,38 @@ import {
   emojiForCategory,
   isBudgetRequest,
   isCategoryRequest,
+  isExportRequest,
   parseMoneyPhrase,
   prettifyCategoryName,
   resolveCategorySlug,
   slugifyCategory,
 } from '../src/utils/nlp.js';
+
+test('isExportRequest detecta el pedido de exportar a archivo', () => {
+  // Sin esto, "pasame el csv de los gastos" llegaba al extractor de gastos y
+  // podía terminar anotado como un gasto inventado.
+  assert.equal(isExportRequest('exportame los gastos'), true);
+  assert.equal(isExportRequest('pasame el csv'), true);
+  assert.equal(isExportRequest('bajame un excel'), true);
+  assert.equal(isExportRequest('quiero mis gastos en una planilla'), true);
+  assert.equal(isExportRequest('descargar los gastos'), true);
+  assert.equal(isExportRequest('exportá mis movimientos'), true);
+});
+
+test('isExportRequest no confunde un gasto normal', () => {
+  assert.equal(isExportRequest('gasté 3500 en el super'), false);
+  assert.equal(isExportRequest('cuánto gasté este mes'), false);
+  assert.equal(isExportRequest('presupuesto de 50 lucas en super'), false);
+});
+
+test('isExportRequest no confunde "pasame/mandame" con otros pedidos', () => {
+  // Regresion: al agregar "pasame" y "mandame" al patron, "mandame un resumen" y
+  // "pasame el ultimo gasto" daban falso positivo. Son pedidos validos pero NO de
+  // exportacion, y se resuelven por el camino conversacional normal.
+  assert.equal(isExportRequest('mandame un resumen'), false);
+  assert.equal(isExportRequest('pasame el ultimo gasto'), false);
+  assert.equal(isExportRequest('pasé 2000 en la nafta'), false);
+});
 
 test('resolveCategorySlug traduce los alias es-AR', () => {
   assert.equal(resolveCategorySlug('super'), 'supermercado');

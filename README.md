@@ -56,10 +56,19 @@ registro financiero diario mediante:
 ### Exportar a CSV
 
 `/exportar` te manda un archivo `gastos-AAAA-MM-DD.csv` con **todos** tus gastos.
-Cuatro detalles que hacen que se abra bien en Excel:
+También funciona en lenguaje natural y por audio: _"exportame los gastos"_,
+_"pasame el csv"_, _"bajame un excel"_ (los tres caminos generan el mismo archivo).
 
-- **Separador `;`**: en es-AR la coma es el separador decimal. Con coma de columna,
-  Excel con configuración regional argentina abre el archivo partido al medio.
+Cinco detalles que hacen que se abra bien en cualquier planilla:
+
+- **Separador `;`**: en es-AR la coma es el separador **decimal**. Con coma de
+  columna, Excel y Google Sheets con configuración regional argentina **fusionan
+  todas las columnas en una sola**. Ese bug seêmio pasó: en un editor de texto el
+  archivo parecía bien, pero al abrirlo todo caía en la primera celda.
+- **Todas las celdas entrecomilladas**, incluso las simples. Con eso, si la
+  herramienta está configurada para `,` (Excel en inglés), los `;` quedan dentro
+  de comillas y **las columnas no se mezclan**. El archivo sirve en cualquier
+  configuración regional.
 - **BOM UTF-8**: sin él, "Peluquería" aparece como "PeluquerÃ­a".
 - **Sin emoji en la categoría**: "🍔 Comida" no agrupa con "Comida" al filtrar.
 - **Montos como números** (`8000`, no `$8.000`): para que la planilla los sume.

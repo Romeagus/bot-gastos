@@ -7,7 +7,7 @@
  * "texto interpretado -> gasto persistido -> respuesta".
  */
 
-import { Markup, type Context } from 'telegraf';
+import { Input, Markup, type Context } from 'telegraf';
 import { env } from '../../config/env.js';
 import type { ParsedExpense } from '../../domain/schemas/parsed-expense.schema.js';
 import type { Expense, ExpenseSourceType } from '../../domain/types/expense.js';
@@ -33,6 +33,7 @@ import { createLogger } from '../../utils/logger.js';
 import {
   isBudgetRequest,
   isCategoryRequest,
+  isExportRequest,
   parseMoneyPhrase,
   resolveCategorySlug,
   slugifyCategory,
@@ -164,9 +165,11 @@ async function handleInstruction(
   telegramMessageId: number | null,
   heardText?: string,
 ): Promise<void> {
-  // Un pedido de presupuesto o de categoria NO es un gasto, aunque mencione un
-  // monto o una categoria: lo resolvemos por el camino conversacional.
-  const isConversational = isBudgetRequest(text) || isCategoryRequest(text);
+  // Un pedido de presupuesto, de categoria o de exportacion NO es un gasto, aunque
+  // mencione un monto o una categoria: lo resolvemos por el camino conversacional.
+  // Sin este filtro, "pasame el csv de los gastos" podria anotarse como un gasto.
+  const isConversational =
+    isBudgetRequest(text) || isCategoryRequest(text) || isExportRequest(text);
 
   if (!isConversational) {
     const registered = await logExpenseFromText(ctx, user, text, sourceType, telegramMessageId);
@@ -186,8 +189,23 @@ async function handleInstruction(
   );
 }
 
-/** Responde un `Answer`, convirtiendo sus botones en un teclado de Telegram. */
+/**
+ * Responde un `Answer`, convirtiendo sus botones en un teclado y sus documentos
+ * en un archivo adjunto.
+ */
 export async function replyAnswer(ctx: Context, answer: Answer): Promise<void> {
+  // El archivo tiene prioridad: en Telegram un mensaje con teclado inline y un
+  // documento a la vez se renderiza mal, asi que van por separado.
+  if (answer.document !== undefined) {
+    const { filename, content } = answer.document;
+    await ctx.replyWithDocument(Input.fromBuffer(content, filename), {
+      caption: answer.text,
+      // React: no deja "enviar" el archivo y confunde con los botones de borrar.
+      disable_notification: true,
+    });
+    return;
+  }
+
   if (answer.buttons === undefined) {
     await ctx.reply(answer.text);
     return;

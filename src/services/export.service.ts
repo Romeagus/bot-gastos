@@ -6,18 +6,28 @@
  * El dato mas valioso que produce el bot es el historico, y sin esto queda
  * atrapado en una base a la que el usuario no tiene acceso. El CSV lo libera.
  *
- * Decisiones:
- *   * Separador `;` y no `,`: en es-AR la coma es el separador DECIMAL. Con
- *     coma como separador de columnas, Excel/Sheets de config regional argentina
- *     abre el archivo partido en la mitad. El `;` evita ese problema.
- *   * Encabezado con BOM UTF-8: sin el, Excel abre "Peluqueria" sin tilde.
- *   * Fechas dd/mm/aaaa (formato local), no ISO: el archivo lo va a abrir una
- *     persona, no otro programa.
+ * Decisiones (verificadas leyendo el archivo generado, no a ojo):
+ *   * Separador `;` y no `,`: en es-AR la coma es el separador DECIMAL. Con coma
+ *     como separador de columnas, Excel y Google Sheets con configuracion regional
+ *     argentina FUSIONAN todas las columnas en una sola. Ese bug sezirio: en un
+ *     editor de texto el archivo "parecia" bien (se veian los `;`), pero al abrirlo
+ *     todo caia dentro de la primera celda.
+ *   * Se entrecomilla SIEMPRE cada celda, no solo cuando hace falta. Con un unico
+ *     separador esto no cambia nada, pero vuelve el archivo valido tambien si
+ *     alguien lo reimporta pidiendo `,` como separador: los `;` quedan dentro de
+ *     comillas y la herramienta los respeta. Asi el archivo sirve igual en un
+ *     Excel en ingles y en uno en español.
+ *   * BOM UTF-8: sin el, Excel abre "Peluqueria" sin tilde.
+ *   * Fechas dd/mm/aaaa (formato local), no ISO: el archivo lo abre una persona.
  *   * Se excluyen los gastos `rejected` (borrados logicamente): exportar tambien
  *     lo que el usuario borro daria una contabilidad que no existe.
  */
 
+import { listAllByUser } from '../db/repositories/expenses.repo.js';
 import type { Expense } from '../domain/types/expense.js';
+import type { User } from '../domain/types/user.js';
+import { plural, type Answer } from './answer.js';
+import { categoryNameMap } from './categories.service.js';
 
 /** Encabezados del CSV, en orden. */
 const HEADERS = [
@@ -57,21 +67,23 @@ function formatDate(date: Date): string {
 /**
  * Escapa un valor para CSV.
  *
- * El caso importante es el punto y coma: si un comercio se llama "Farmacia; SA"
- * sin comillas, Excel lo parte en dos columnas. Se entrecomilla SIEMPRE cuando
- * hay separador, salto de linea o comilla, y se duplican las comillas internas
- * (regla de RFC 4180).
+ * Se entrecomilla SIEMPRE, no solo cuando el valor trae separador. Con un unico
+ * separador (`;`) el resultado es el mismo y el archivo sigue siendo valido; pero
+ * si alguien lo abre con una herramienta configurada para `,` (un Excel en ingles,
+ * o Google Sheets en otro locale), los `;` quedan protegidos dentro de las
+ * comillas y las columnas no se fusionan. Es la diferencia entre que el archivo
+ * sirva en cualquier maquina o solo en una.
+ *
+ * Ademas duplica las comillas internas (regla de RFC 4180).
  */
 export function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) {
-    return '';
+    return '""';
   }
 
   const text = String(value);
-  const needsQuotes = /[";\n\r]/.test(text);
-  const escaped = text.replace(/"/g, '""');
-
-  return needsQuotes ? `"${escaped}"` : escaped;
+  // Siempre entrecomillada; solo se escapan las comillas internas.
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 /** Une las celdas de una fila. */
@@ -115,4 +127,31 @@ export function buildCsv(expenses: readonly Expense[], categoryNames: Map<string
 export function csvFilename(now = new Date()): string {
   const iso = now.toISOString();
   return `gastos-${iso.slice(0, 10)}.csv`;
+}
+
+/**
+ * Arma la respuesta completa de la exportacion (texto + archivo).
+ *
+ * Vive en el servicio y no en el handler para que el CSV se pueda pedir igual por
+ * `/exportar`, por texto o por audio: los tres caminos terminan aca y devuelven
+ * exactamente el mismo archivo.
+ *
+ * @returns La respuesta, o un texto de aviso si no hay gastos que exportar.
+ */
+export async function buildExportAnswer(user: User): Promise<Answer> {
+  const expenses = await listAllByUser(user.id);
+
+  if (expenses.length === 0) {
+    return { text: 'Todavía no tenés gastos para exportar 🤷' };
+  }
+
+  const csv = buildCsv(expenses, await categoryNameMap(user.id));
+
+  return {
+    text: `📊 Acá tenés tus ${plural(expenses.length, 'gasto', 'gastos')}, listos para abrir en Excel.`,
+    document: {
+      filename: csvFilename(),
+      content: Buffer.from(csv, 'utf8'),
+    },
+  };
 }

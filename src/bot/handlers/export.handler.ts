@@ -7,51 +7,45 @@
  * sin esto, el historico queda atrapado en la base y el usuario no puede llevarlo
  * a una planilla para analizarlo.
  *
- * Usa `Input.fromBuffer` (API oficial de Telegraf) porque el CSV se arma en
- * memoria: no hace falta escribir un archivo temporal en disco.
+ * Este handler es solo el atajo del comando: el archivo se arma en
+ * `buildExportAnswer` y lo envia `replyAnswer`, los MISMOS que usan el pedido en
+ * lenguaje natural y por audio. Asi no hay dos implementaciones que puedan
+ * divergir (y no volver a pasar lo que paso: un camino con el CSV bien y otro roto).
  */
 
-import { Input, type Telegraf } from 'telegraf';
-import { listAllByUser } from '../../db/repositories/expenses.repo.js';
-import { categoryNameMap } from '../../services/categories.service.js';
-import { buildCsv, csvFilename } from '../../services/export.service.js';
+import type { Telegraf } from 'telegraf';
+import { buildExportAnswer } from '../../services/export.service.js';
 import { createLogger } from '../../utils/logger.js';
-import { resolveUser } from './shared.js';
+import { replyWithError } from '../reply-error.js';
+import { replyAnswer, resolveUser } from './shared.js';
 
 const log = createLogger('bot:export');
 
 /** Registra el comando /exportar. */
 export function registerExportHandler(bot: Telegraf): void {
   bot.command('exportar', async (ctx) => {
+    // Se declara fuera del try porque el catch la necesita.
+    let userId: string | null = null;
+
     try {
       const user = await resolveUser(ctx);
       if (user === null) {
         await ctx.reply('No pude identificarte 😅 Probá de nuevo.');
         return;
       }
+      userId = user.id;
 
-      const expenses = await listAllByUser(user.id);
+      const answer = await buildExportAnswer(user);
+      await replyAnswer(ctx, answer);
 
-      if (expenses.length === 0) {
-        await ctx.reply('Todavía no tenés gastos para exportar 🤷');
-        return;
+      if (answer.document !== undefined) {
+        log.info('CSV exportado', { userId: user.id });
       }
-
-      // Sin emoji en la categoria: en una planilla el emoji rompe el agrupado.
-      const names = await categoryNameMap(user.id);
-      const csv = buildCsv(expenses, names);
-
-      await ctx.replyWithDocument(
-        Input.fromBuffer(Buffer.from(csv, 'utf8'), csvFilename()),
-        { caption: `📊 Acá tenés tus ${expenses.length} gastos, listos para abrir en Excel.` },
-      );
-
-      log.info('CSV exportado', { userId: user.id, rows: expenses.length });
     } catch (error) {
-      log.error('Fallo la exportacion a CSV', {
-        error: error instanceof Error ? error.message : String(error),
+      await replyWithError(ctx, userId, 'command', error, {
+        context: 'exportacion CSV',
+        extra: 'Si tenés muchos gastos puede tardar un poco, probá de nuevo.',
       });
-      await ctx.reply('No pude armar el archivo 🙈 Probá de nuevo en un rato.');
     }
   });
 }

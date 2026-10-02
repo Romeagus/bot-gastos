@@ -30,6 +30,7 @@ import {
   periodOf,
 } from './budgets.service.js';
 import { buildDeleteMenu, buildEditMenu } from './expenses-menu.service.js';
+import { buildExportAnswer } from './export.service.js';
 // Se importa con alias para no tocar los usos internos de este modulo.
 import {
   categoryLabelMap as categoryLabels,
@@ -55,6 +56,7 @@ const PLAN_SCHEMA = z.object({
       'category_create',
       'category_list',
       'capabilities',
+      'export',
       'unknown',
     ])
     .catch('unknown'),
@@ -83,7 +85,7 @@ const SYSTEM_PROMPT = [
   '  "intent": "summary" | "category_total" | "top_categories" | "last_expenses" |',
   '            "expense_delete_last" | "expense_clear" | "expense_edit" |',
   '            "budget_set" | "budget_delete" | "budget_list" |',
-  '            "category_create" | "category_list" | "capabilities" | "unknown",',
+  '            "category_create" | "category_list" | "capabilities" | "export" | "unknown",',
   '  "category": string | null,      // categoría o sinónimo tal como aparece ("super", "nafta", "gimnasio")',
   '  "amount_text": string | null,   // solo si intent="budget_set": el monto tal cual lo dijo ("50 lucas", "50000")',
   '  "category_name": string | null, // solo si intent="category_create": el NOMBRE de la categoría nueva',
@@ -104,6 +106,7 @@ const SYSTEM_PROMPT = [
   '- "category_create": quiere CREAR una categoría nueva ("creá la categoría gimnasio").',
   '- "category_list": quiere VER sus categorías ("qué categorías tengo", "mis categorías").',
   '- "capabilities": saludo, agradecimiento o pregunta sobre el bot ("hola", "gracias", "qué podés hacer").',
+  '- "export": quiere descargar sus gastos en un archivo ("exportame los gastos", "pasame el csv", "bajame un excel", "quiero ver mis gastos en una planilla").',
   '- "unknown": cualquier otra cosa.',
   '',
   'Reglas:',
@@ -200,6 +203,7 @@ const CAPABILITIES = [
   '',
   '💸 Anotar: "gasté 3500 en el super" · un audio 🎙️ · una foto del ticket 📸',
   '📊 Ver: "cuánto gasté este mes" · "en qué gasté más" · "mis últimos gastos"',
+  '  Y pedime un archivo cuando quieras: "exportame los gastos" 📈',
   '🎯 Topes: "presupuesto de 50 lucas en super" · "cómo vienen mis topes"',
   '🏷️ Categorías: "creá la categoría gimnasio" · "qué categorías tengo"',
   '',
@@ -462,6 +466,9 @@ async function dispatch(
       return answerCategoryList(user);
     case 'capabilities':
       return CAPABILITIES;
+    case 'export':
+      // El archivo se arma en el servicio; aca solo se decide que responder.
+      return buildExportAnswer(user);
     default:
       return null;
   }

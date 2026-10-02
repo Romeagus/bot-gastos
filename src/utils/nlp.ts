@@ -230,6 +230,25 @@ export function isCategoryRequest(input: string): boolean {
 }
 
 /**
+ * Detecta si el mensaje pide EXPORTAR los gastos a un archivo.
+ * Ej: "exportame los gastos", "pasame el csv", "bajame un excel".
+ *
+ * Existe por el mismo motivo que `isBudgetRequest`: si el mensaje llegara al
+ * extractor de gastos, "pasame el csv de los gastos" podria terminar anotado como
+ * un gasto de 0 o de alguna cifra inventada. Se detecta antes, con palabras
+ * claves, y se manda directo al camino conversacional.
+ */
+export function isExportRequest(input: string): boolean {
+  // OJO: NO se incluyen "pasame" ni "mandame" a secas. Con ellos, "mandame un
+  // resumen" y "pasame el ultimo gasto" daban falso positivo y esos mensajes NO son
+  // pedidos de exportacion (se resuelven por el camino conversacional normal).
+  // Se incluyen las palabras que SI nombran un archivo o una planilla.
+  return /\b(export|exportar|csv|excel|planilla|hoja de calculo|descarg|descargar|bajar|bajame)/.test(
+    normalize(input),
+  );
+}
+
+/**
  * Convierte un nombre libre en un slug valido para `categories.slug`.
  * El DDL exige `^[a-z0-9_]+$`, por eso se quitan acentos y simbolos.
  * "Peluquería y Estética!" -> "peluqueria_y_estetica"
