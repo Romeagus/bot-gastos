@@ -35,6 +35,7 @@ import {
 } from '../../domain/types/expense.js';
 import { AppError } from '../../utils/errors.js';
 import { parseMoneyText } from '../../utils/format.js';
+import { parseJsonLoose } from '../../utils/json.js';
 import { createLogger } from '../../utils/logger.js';
 import { resolveCategorySlug, slugifyCategory } from '../../utils/nlp.js';
 import { chatCompletion } from './openai-compatible.client.js';
@@ -219,7 +220,7 @@ export async function extractExpenseFromImage(
     timeoutMs: 60_000,
   });
 
-  const raw = safeJsonParse(content);
+  const raw = parseJsonLoose(content);
   if (raw === null || typeof raw !== 'object') {
     log.warn('El modelo de vision no devolvio JSON valido', { content: content.slice(0, 200) });
     return null;
@@ -264,18 +265,4 @@ export async function extractExpenseFromImage(
   });
 
   return parsed;
-}
-
-/** Los modelos a veces envuelven el JSON en ```json ... ```. */
-function safeJsonParse(text: string): unknown {
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '');
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    return null;
-  }
 }

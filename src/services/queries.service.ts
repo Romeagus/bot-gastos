@@ -20,6 +20,7 @@ import { formatMoney, formatShortDate } from '../utils/format.js';
 import { createLogger } from '../utils/logger.js';
 import { parseMoneyPhrase, resolveCategorySlug, slugifyCategory } from '../utils/nlp.js';
 import { chatCompletion } from './ai/openai-compatible.client.js';
+import { asAnswer, type Answer } from './answer.js';
 import {
   deleteBudgetForCategory,
   describeProgress,
@@ -28,7 +29,7 @@ import {
   getBudgetStatusForCategory,
   periodOf,
 } from './budgets.service.js';
-import { deleteMostRecentExpense } from './expenses.service.js';
+import { buildDeleteMenu, buildEditMenu } from './expenses-menu.service.js';
 // Se importa con alias para no tocar los usos internos de este modulo.
 import {
   categoryLabelMap as categoryLabels,
@@ -47,6 +48,7 @@ const PLAN_SCHEMA = z.object({
       'last_expenses',
       'expense_delete_last',
       'expense_clear',
+      'expense_edit',
       'budget_set',
       'budget_delete',
       'budget_list',
@@ -79,7 +81,7 @@ const SYSTEM_PROMPT = [
   'Clasificás el mensaje del usuario y devolvés SOLO un objeto JSON:',
   '{',
   '  "intent": "summary" | "category_total" | "top_categories" | "last_expenses" |',
-  '            "expense_delete_last" | "expense_clear" |',
+  '            "expense_delete_last" | "expense_clear" | "expense_edit" |',
   '            "budget_set" | "budget_delete" | "budget_list" |',
   '            "category_create" | "category_list" | "capabilities" | "unknown",',
   '  "category": string | null,      // categoría o sinónimo tal como aparece ("super", "nafta", "gimnasio")',
@@ -95,6 +97,7 @@ const SYSTEM_PROMPT = [
   '- "last_expenses": quiere ver movimientos ("mis últimos gastos", "qué cargué").',
   '- "expense_delete_last": quiere BORRAR el último gasto ("borrá el último", "eliminá el último que anoté").',
   '- "expense_clear": quiere borrar TODOS sus gastos ("borrá todo", "quiero empezar de cero").',
+  '- "expense_edit": quiere CORREGIR un gasto que ya anotó ("editar el último", "me equivoqué con un gasto").',
   '- "budget_set": quiere FIJAR un límite ("presupuesto de 50 lucas en super").',
   '- "budget_delete": quiere BORRAR un tope ("borrá el tope de super", "sacá el presupuesto de nafta").',
   '- "budget_list": quiere VER sus límites ("mis presupuestos", "cuánto me queda de super").',
@@ -385,18 +388,6 @@ async function answerMissingCategory(user: User): Promise<string> {
   ].join('\n');
 }
 
-/** Borra el gasto mas reciente ("borrá el último"). */
-async function applyDeleteLastExpense(user: User): Promise<string> {
-  const result = await deleteMostRecentExpense(user.id);
-
-  if (!result.deleted || result.expense === null) {
-    return result.reason ?? 'No pude borrar el último gasto.';
-  }
-
-  const expense = result.expense;
-  return `🗑️ Listo, borré ${formatMoney(expense.amount, expense.currency)} del ${formatShortDate(expense.spentAt)}.`;
-}
-
 /**
  * El usuario pidio borrar TODO: se lo deriva al comando `/reset`.
  *
@@ -433,20 +424,14 @@ async function applyBudgetDelete(user: User, plan: QueryPlan): Promise<string> {
 }
 
 /**
- * Interpreta un mensaje que NO es un gasto y devuelve la respuesta.
- *
- * @returns El texto a responder, o `null` si no se entendió el mensaje.
+ * Ejecuta el plan clasificado: devuelve un texto suelto o una respuesta con
+ * botones de datos (sin depender de Telegraf).
  */
-export async function handleRequest(user: User, text: string): Promise<string | null> {
-  const plan = await buildPlan(text);
-  log.debug('Plan de conversación', {
-    intent: plan.intent,
-    period: plan.period,
-    category: plan.category,
-  });
-
-  const range = periodRange(plan.period, new Date());
-
+async function dispatch(
+  user: User,
+  plan: QueryPlan,
+  range: PeriodRange,
+): Promise<string | Answer | null> {
   switch (plan.intent) {
     case 'summary':
       return answerSummary(user, range);
@@ -459,9 +444,12 @@ export async function handleRequest(user: User, text: string): Promise<string | 
     case 'last_expenses':
       return answerLastExpenses(user);
     case 'expense_delete_last':
-      return applyDeleteLastExpense(user);
+      // Nunca se borra solo: primero se elige cual, con un boton.
+      return buildDeleteMenu(user);
     case 'expense_clear':
       return answerClearExpenses();
+    case 'expense_edit':
+      return buildEditMenu(user);
     case 'budget_set':
       return applyBudgetSet(user, plan);
     case 'budget_delete':
@@ -477,4 +465,22 @@ export async function handleRequest(user: User, text: string): Promise<string | 
     default:
       return null;
   }
+}
+
+/**
+ * Interpreta un mensaje que NO es un gasto y devuelve la respuesta.
+ *
+ * @returns La respuesta (texto y, si corresponde, botones), o `null` si no se
+ *          entendió el mensaje.
+ */
+export async function handleRequest(user: User, text: string): Promise<Answer | null> {
+  const plan = await buildPlan(text);
+  log.debug('Plan de conversación', {
+    intent: plan.intent,
+    period: plan.period,
+    category: plan.category,
+  });
+
+  const result = await dispatch(user, plan, periodRange(plan.period, new Date()));
+  return result === null ? null : asAnswer(result);
 }

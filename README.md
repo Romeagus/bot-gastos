@@ -12,11 +12,18 @@ registro financiero diario mediante:
    cada gasto mientras sigas cerca o pasado del tope.
 5. **Categorías propias** — creá las tuyas ("gimnasio", "jardín") y usalas tanto
    para anotar gastos como para ponerles un tope.
+6. **Varias instrucciones en un mismo mensaje** — "gasté 3500 en el super y cuánto
+   gasté este mes" (típico de un audio): las separa y las resuelve una por una.
+7. **Nada se anota sin tu OK** — si la IA no está segura de lo que escuchó, o el
+   monto parece dudoso, el gasto queda pendiente y te lo confirmás con botones.
+8. **Borrar y editar** — `/borrar` y `/editar` te listan tus últimos gastos con
+   botones: vos elegís cuál tocar, el bot nunca adivina.
 
 > Estado actual: **MVP funcional.** Registro (texto / audio / foto), consultas,
-> topes con alertas y categorías propias funcionan de punta a punta. Los tickets
-> se leen con el modelo de visión de Groq (misma cuenta que el audio) y el gasto
-> **siempre se confirma con botones** antes de quedar anotado.
+> topes con alertas, categorías propias, varias instrucciones por mensaje, borrado
+> y edición funcionan de punta a punta. Los tickets se leen con el modelo de visión
+> de Groq (misma cuenta que el audio) y todo lo dudoso **se confirma con botones**
+> antes de quedar anotado.
 
 ### Cómo se usa
 
@@ -30,10 +37,22 @@ registro financiero diario mediante:
 | Borrar un tope      | `borrá el tope de super`                                               |
 | Crear una categoría | `creá la categoría gimnasio`                                           |
 | Borrar un gasto     | `/borrar` (te lista los últimos con botones) · `borrá el último`       |
+| Corregir un gasto   | `/editar` (elegís el gasto y el campo: monto o categoría)              |
 | Empezar de cero     | `/reset` (borra todo pidiendo confirmación)                            |
 
 **Todo esto funciona igual por texto que por audio.** Comandos disponibles:
-`/start`, `/help`, `/presupuesto`, `/categoria`, `/borrar`, `/reset`.
+`/start`, `/help`, `/presupuesto`, `/categoria`, `/borrar`, `/editar`, `/reset`.
+
+### Cuando no te entiende
+
+Tres medidas para que un error de la IA no te ensucie la cuenta:
+
+- **Varias órdenes en un mensaje**: _"gasté 3500 en el super y cuánto gasté este
+  mes"_ se parte y se responde una por una (hasta 5).
+- **Baja confianza**: si el modelo no está seguro de lo que escuchó, el gasto
+  **no se anota**: queda pendiente y te lo confirmás con **Sí / No**.
+- **Nada destructivo por voz**: decir _"borrá el último"_ **no borra**: te muestra
+  el menú para que elijas vos cuál. Lo mismo con `borrar todo`.
 
 ## Stack
 
@@ -66,27 +85,32 @@ bot-gastos/
 │  │  └─ env.ts                  # lectura y validación de variables de entorno
 │  ├─ bot/
 │  │  ├─ bot.ts                  # instancia de Telegraf + middlewares globales
-│  │  ├─ handlers/               # comandos y mensajes (audio, foto, texto)
+│  │  ├─ handlers/               # un archivo por comando/mensaje + shared.ts
 │  │  ├─ middlewares/            # auth por usuario, logging, manejo de errores
-│  │  └─ keyboards/              # teclados inline/reply
+│  │  ├─ pending-edit.ts         # edición en curso (expira a los 5 min)
+│  │  └─ keyboards/              # (reservado)
 │  ├─ services/
 │  │  ├─ ai/
 │  │  │  ├─ transcription.service.ts   # Groq / Whisper
 │  │  │  ├─ vision.service.ts          # Groq / Qwen (tickets)
-│  │  │  └─ reasoning.service.ts       # DeepSeek (estructuración a JSON)
-│  │  ├─ expenses.service.ts     # lógica de negocio de gastos
-│  │  ├─ budgets.service.ts      # lógica de negocio de presupuestos
-│  │  ├─ categories.service.ts   # resolución de categorías
-│  │  └─ alerts.service.ts       # cálculo/emisión de alertas
+│  │  │  ├─ reasoning.service.ts       # estructuración a JSON
+│  │  │  ├─ instructions.service.ts    # separa varias órdenes en un mensaje
+│  │  │  └─ openai-compatible.client.ts
+│  │  ├─ expenses.service.ts     # alta, borrado lógico y edición de gastos
+│  │  ├─ expenses-menu.service.ts# menus de /borrar, /editar y /reset
+│  │  ├─ budgets.service.ts      # topes, avance y alertas
+│  │  ├─ categories.service.ts   # resolución de categorías (alias + propias)
+│  │  ├─ queries.service.ts      # consultas en lenguaje natural
+│  │  └─ answer.ts               # respuesta (texto + botones) sin Telegraf
 │  ├─ db/
 │  │  ├─ client.ts               # Pool de conexiones (pg)
 │  │  └─ repositories/           # acceso a datos, una tabla por archivo
 │  ├─ domain/
 │  │  ├─ types/                  # tipos y DTOs del dominio
 │  │  └─ schemas/                # esquemas zod (validación de salidas de IA)
-│  ├─ jobs/                      # tareas programadas (alertas de presupuesto)
-│  └─ utils/                     # logger, errores, helpers de dinero/fechas
-├─ tests/
+│  ├─ jobs/                      # (reservado para tareas programadas)
+│  └─ utils/                     # logger, errores, nlp, formato de dinero/fechas
+├─ tests/                        # tests unitarios (node:test + tsx, sin DB)
 ├─ .env.example
 ├─ eslint.config.js
 ├─ tsconfig.json

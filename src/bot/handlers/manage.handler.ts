@@ -1,131 +1,44 @@
 /**
- * Handler de gestion de gastos: /borrar y /reset.
+ * Handler de gestion de gastos: /borrar, /editar y /reset.
  * -----------------------------------------------------------------------------
  * Archivo : src/bot/handlers/manage.handler.ts
  *
- * Son las dos operaciones destructivas del bot, asi que van por COMANDO y
- * siempre piden confirmacion con botones: nunca se borra nada a partir de un
- * mensaje suelto que el bot podria haber malinterpretado.
+ * Los menus viven en `expenses-menu.service`: los comparten estos comandos y el
+ * lenguaje natural ("borrá el último"). Eso es justamente lo que permite que el
+ * camino conversacional pida confirmacion en vez de actuar solo.
  *
  * El borrado es LOGICO (`status = 'rejected'`): el gasto desaparece de totales,
  * topes y listados, y la fila queda en la base por si hay que recuperarla.
  *
  * callback_data:
- *   del:<uuid>  -> borra ese gasto
- *   reset:ask   -> pide confirmacion para borrar todo
- *   reset:exp   -> borra solo los gastos
- *   reset:all   -> borra gastos y topes
- *   reset:no    -> cancela
- *   mng:close   -> cierra el menu
+ *   del:<uuid>           -> borra ese gasto
+ *   edt:<uuid>           -> menu de "que quiero cambiar"
+ *   edtf:<uuid>:<campo>  -> pide el valor nuevo (monto o categoria)
+ *   reset:ask|exp|all|no -> borrar todo, con confirmacion
+ *   mng:close            -> cierra el menu
  */
 
-import { Markup, type Context, type Telegraf } from 'telegraf';
-import type { Expense } from '../../domain/types/expense.js';
+import { type Context, type Telegraf } from 'telegraf';
 import type { User } from '../../domain/types/user.js';
+import { plural } from '../../services/answer.js';
 import { clearAllBudgets } from '../../services/budgets.service.js';
-import { categoryLabelMap } from '../../services/categories.service.js';
 import {
-  clearAllExpenses,
-  deleteExpense,
-  getExpenseSummary,
-  listRecentExpenses,
-} from '../../services/expenses.service.js';
+  buildDeleteMenu,
+  buildEditFieldMenu,
+  buildEditMenu,
+  buildResetConfirmation,
+} from '../../services/expenses-menu.service.js';
+import { clearAllExpenses, deleteExpense } from '../../services/expenses.service.js';
 import { formatMoney, formatShortDate } from '../../utils/format.js';
 import { createLogger } from '../../utils/logger.js';
-import { resolveUser } from './shared.js';
+import { setPendingEdit } from '../pending-edit.js';
+import { replyAnswer, resolveUser } from './shared.js';
 
 const log = createLogger('bot:manage');
-
-/** Cuantos gastos se ofrecen para borrar de a uno. */
-const DELETE_MENU_SIZE = 5;
-
-/** Recorta un texto para que entre comodo en un boton. */
-function truncate(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
-}
-
-/** Pluraliza de forma simple: '1 movimiento' / '2 movimientos'. */
-function plural(count: number, singular: string, pluralForm: string): string {
-  return `${count} ${count === 1 ? singular : pluralForm}`;
-}
-
-/** Texto del boton que identifica al gasto que se va a borrar. */
-function deleteButtonLabel(expense: Expense, labels: Map<string, string>): string {
-  const name =
-    expense.categoryId === null ? 'Sin categoría' : (labels.get(expense.categoryId) ?? '?');
-  const amount = formatMoney(expense.amount, expense.currency);
-  return `🗑️ ${formatShortDate(expense.spentAt)} ${amount} ${truncate(name, 14)}`;
-}
 
 /** Quita los botones del mensaje original (si ya no estan, no pasa nada). */
 async function clearButtons(ctx: Context): Promise<void> {
   await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => undefined);
-}
-
-/**
- * Muestra el menu de borrado con los ultimos gastos, uno por boton.
- *
- * @param header Texto opcional arriba del listado (ej. el resultado de borrar).
- */
-async function showDeleteMenu(ctx: Context, user: User, header?: string): Promise<void> {
-  const [expenses, labels, summary] = await Promise.all([
-    listRecentExpenses(user.id, DELETE_MENU_SIZE),
-    categoryLabelMap(user.id),
-    getExpenseSummary(user.id),
-  ]);
-
-  if (expenses.length === 0) {
-    await ctx.reply(
-      header === undefined
-        ? 'No tenés ningún gasto para borrar 🤷'
-        : `${header}\n\nNo te queda ningún gasto 🤷`,
-    );
-    return;
-  }
-
-  const rows = expenses.map((expense) => [
-    Markup.button.callback(deleteButtonLabel(expense, labels), `del:${expense.id}`),
-  ]);
-  rows.push([Markup.button.callback(`🗑️ Borrar TODO (${summary.count})`, 'reset:ask')]);
-  rows.push([Markup.button.callback('❌ Cerrar', 'mng:close')]);
-
-  const lines: string[] = [];
-  if (header !== undefined) {
-    lines.push(header, '');
-  }
-  lines.push(
-    '🧾 ¿Cuál borro? Tocá el que quieras sacar.',
-    '',
-    `Tenés ${plural(summary.count, 'movimiento', 'movimientos')} por ${formatMoney(summary.total, user.currency)}.`,
-  );
-
-  await ctx.reply(lines.join('\n'), Markup.inlineKeyboard(rows));
-}
-
-/** Pide confirmacion antes de borrar todo. */
-async function askReset(ctx: Context, user: User): Promise<void> {
-  const summary = await getExpenseSummary(user.id);
-
-  if (summary.count === 0) {
-    await ctx.reply('No tenés gastos para borrar 🤷');
-    return;
-  }
-
-  await ctx.reply(
-    [
-      '⚠️ ¿Seguro que querés borrar todo?',
-      '',
-      `Se van a borrar ${plural(summary.count, 'movimiento', 'movimientos')} por ${formatMoney(summary.total, user.currency)}.`,
-      'Tus categorías propias no se tocan.',
-      '',
-      'No se puede deshacer desde el chat.',
-    ].join('\n'),
-    Markup.inlineKeyboard([
-      [Markup.button.callback('🗑️ Borrar solo los gastos', 'reset:exp')],
-      [Markup.button.callback('🗑️ Gastos y topes', 'reset:all')],
-      [Markup.button.callback('❌ Cancelar', 'reset:no')],
-    ]),
-  );
 }
 
 /** Borra todos los gastos (y opcionalmente los topes) y reporta el resultado. */
@@ -166,13 +79,13 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Registra los comandos /borrar y /reset, y sus botones de confirmacion. */
+/** Registra los comandos /borrar, /editar y /reset, y sus botones. */
 export function registerManageHandler(bot: Telegraf): void {
   bot.command('borrar', async (ctx) => {
     try {
       const user = await requireUser(ctx);
       if (user !== null) {
-        await showDeleteMenu(ctx, user);
+        await replyAnswer(ctx, await buildDeleteMenu(user));
       }
     } catch (error) {
       log.error('Fallo el menu de borrado', { error: describe(error) });
@@ -180,11 +93,23 @@ export function registerManageHandler(bot: Telegraf): void {
     }
   });
 
+  bot.command('editar', async (ctx) => {
+    try {
+      const user = await requireUser(ctx);
+      if (user !== null) {
+        await replyAnswer(ctx, await buildEditMenu(user));
+      }
+    } catch (error) {
+      log.error('Fallo el menu de edicion', { error: describe(error) });
+      await ctx.reply('Uhh, algo se me rompió al editar 🙈 Probá de nuevo.');
+    }
+  });
+
   bot.command('reset', async (ctx) => {
     try {
       const user = await requireUser(ctx);
       if (user !== null) {
-        await askReset(ctx, user);
+        await replyAnswer(ctx, await buildResetConfirmation(user));
       }
     } catch (error) {
       log.error('Fallo el reset', { error: describe(error) });
@@ -192,7 +117,7 @@ export function registerManageHandler(bot: Telegraf): void {
     }
   });
 
-  bot.action(/^(del|reset|mng):/, async (ctx) => {
+  bot.action(/^(del|edt|edtf|reset|mng):/, async (ctx) => {
     // Detiene el "relojito" del boton en el cliente.
     await ctx.answerCbQuery().catch(() => undefined);
 
@@ -214,12 +139,37 @@ export function registerManageHandler(bot: Telegraf): void {
           result.deleted && result.expense !== null
             ? `🗑️ Borrado: ${formatMoney(result.expense.amount, result.expense.currency)} del ${formatShortDate(result.expense.spentAt)}.`
             : (result.reason ?? 'No pude borrar ese gasto.');
-        await showDeleteMenu(ctx, user, header);
+        await replyAnswer(ctx, await buildDeleteMenu(user, header));
+        return;
+      }
+
+      if (data.startsWith('edt:')) {
+        await replyAnswer(ctx, await buildEditFieldMenu(user, data.slice(4)));
+        return;
+      }
+
+      // Se guarda que se esta editando y se pide el valor nuevo: el proximo
+      // mensaje del usuario (texto o audio) se interpreta como ese valor.
+      if (data.startsWith('edtf:')) {
+        const parts = data.split(':');
+        const expenseId = parts[1];
+        const field = parts[2];
+
+        if (expenseId === undefined || (field !== 'amount' && field !== 'category')) {
+          return;
+        }
+
+        setPendingEdit(user.id, expenseId, field);
+        await ctx.reply(
+          field === 'amount'
+            ? '💸 ¿Cuál es el monto correcto? Pasámelo con un número (ej. "4500").'
+            : '🏷️ ¿A qué categoría lo paso? Mandame el nombre (ej. "comida").',
+        );
         return;
       }
 
       if (data === 'reset:ask') {
-        await askReset(ctx, user);
+        await replyAnswer(ctx, await buildResetConfirmation(user));
         return;
       }
 

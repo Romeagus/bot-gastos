@@ -19,6 +19,7 @@ import {
   PAYMENT_METHODS,
   STANDARD_CATEGORY_SLUGS,
 } from '../../domain/types/expense.js';
+import { parseJsonLoose } from '../../utils/json.js';
 import { createLogger } from '../../utils/logger.js';
 import { chatCompletion } from './openai-compatible.client.js';
 
@@ -123,7 +124,7 @@ export async function parseExpenseFromText(
     ],
   });
 
-  const raw = safeJsonParse(content);
+  const raw = parseJsonLoose(content);
   if (raw === null) {
     log.warn('El modelo no devolvio JSON valido', { content: content.slice(0, 200) });
     return null;
@@ -142,18 +143,4 @@ export async function parseExpenseFromText(
   }
 
   return parsed;
-}
-
-/** Los modelos a veces envuelven el JSON en ```json ... ```. */
-function safeJsonParse(text: string): unknown {
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '');
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    return null;
-  }
 }

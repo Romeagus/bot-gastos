@@ -15,6 +15,8 @@ import {
   listRecentByUser,
   rejectAllForUser,
   summarizeForUser,
+  updateAmountForUser,
+  updateCategoryForUser,
   updateStatusForUser,
 } from '../db/repositories/expenses.repo.js';
 import type { ParsedExpense } from '../domain/schemas/parsed-expense.schema.js';
@@ -191,16 +193,67 @@ export async function deleteExpense(userId: string, expenseId: string): Promise<
     : { deleted: true, expense: updated };
 }
 
-/** Borra el gasto mas reciente ("borrá el último"). */
-export async function deleteMostRecentExpense(userId: string): Promise<DeleteResult> {
-  const recent = await listRecentByUser(userId, 1);
-  const last = recent[0];
+export interface EditResult {
+  readonly edited: boolean;
+  readonly expense: Expense | null;
+  /** Explicacion cuando no se pudo editar (para responderle al usuario). */
+  readonly reason?: string;
+}
 
-  if (last === undefined) {
-    return { deleted: false, expense: null, reason: 'No tenés ningún gasto para borrar.' };
+/** Corrige el monto de un gasto. */
+export async function editExpenseAmount(
+  userId: string,
+  expenseId: string,
+  amount: number,
+): Promise<EditResult> {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return {
+      edited: false,
+      expense: null,
+      reason: 'Ese monto no me sirve: pasame un número mayor a 0.',
+    };
   }
 
-  return deleteExpense(userId, last.id);
+  const expense = await findById(expenseId);
+  if (expense === null || expense.userId !== userId) {
+    return { edited: false, expense: null, reason: 'No encontré ese gasto.' };
+  }
+
+  const updated = await updateAmountForUser(userId, expenseId, amount);
+  if (updated === null) {
+    return { edited: false, expense, reason: 'No pude editar el gasto.' };
+  }
+
+  log.info('Gasto editado (monto)', {
+    expenseId,
+    before: expense.amount,
+    after: updated.amount,
+  });
+  return { edited: true, expense: updated };
+}
+
+/** Corrige la categoria de un gasto. */
+export async function editExpenseCategory(
+  userId: string,
+  expenseId: string,
+  categoryId: string,
+): Promise<EditResult> {
+  const expense = await findById(expenseId);
+  if (expense === null || expense.userId !== userId) {
+    return { edited: false, expense: null, reason: 'No encontré ese gasto.' };
+  }
+
+  const updated = await updateCategoryForUser(userId, expenseId, categoryId);
+  if (updated === null) {
+    return { edited: false, expense, reason: 'No pude editar el gasto.' };
+  }
+
+  log.info('Gasto editado (categoria)', {
+    expenseId,
+    before: expense.categoryId,
+    after: updated.categoryId,
+  });
+  return { edited: true, expense: updated };
 }
 
 /** Borra TODOS los gastos vigentes del usuario. @returns cuantos se borraron. */

@@ -182,6 +182,42 @@ export async function summarizeForUser(
   return { count: Number(row?.count ?? 0), total: Number(row?.total ?? 0) };
 }
 
+/** Cambia el monto de un gasto, acotado a su dueno. */
+export async function updateAmountForUser(
+  userId: string,
+  id: string,
+  amount: number,
+): Promise<Expense | null> {
+  const { rows } = await query<ExpenseRow>(
+    `UPDATE expenses
+        SET amount = $3
+      WHERE id = $2 AND user_id = $1
+      RETURNING ${EXPENSE_COLUMNS}`,
+    [userId, id, amount],
+  );
+
+  const row = rows[0];
+  return row === undefined ? null : toExpense(row);
+}
+
+/** Cambia la categoria de un gasto, acotado a su dueno. */
+export async function updateCategoryForUser(
+  userId: string,
+  id: string,
+  categoryId: string,
+): Promise<Expense | null> {
+  const { rows } = await query<ExpenseRow>(
+    `UPDATE expenses
+        SET category_id = $3
+      WHERE id = $2 AND user_id = $1
+      RETURNING ${EXPENSE_COLUMNS}`,
+    [userId, id, categoryId],
+  );
+
+  const row = rows[0];
+  return row === undefined ? null : toExpense(row);
+}
+
 /** Ultimos gastos vigentes de un usuario, del mas reciente al mas antiguo. */
 export async function listRecentByUser(userId: string, limit = 10): Promise<Expense[]> {
   const { rows } = await query<ExpenseRow>(

@@ -12,14 +12,44 @@ import { env } from '../../config/env.js';
 import type { ParsedExpense } from '../../domain/schemas/parsed-expense.schema.js';
 import type { Expense, ExpenseSourceType } from '../../domain/types/expense.js';
 import type { User } from '../../domain/types/user.js';
+import { findForUserBySlug } from '../../db/repositories/categories.repo.js';
 import { upsertByTelegramId } from '../../db/repositories/users.repo.js';
+import { splitInstructions } from '../../services/ai/instructions.service.js';
 import { parseExpenseFromText } from '../../services/ai/reasoning.service.js';
+import type { Answer } from '../../services/answer.js';
 import { evaluateBudgetAlert } from '../../services/budgets.service.js';
-import { availableCategorySlugs } from '../../services/categories.service.js';
-import { createExpenseFromParsed } from '../../services/expenses.service.js';
+import {
+  availableCategorySlugs,
+  listAvailableCategories,
+} from '../../services/categories.service.js';
+import {
+  createExpenseFromParsed,
+  editExpenseAmount,
+  editExpenseCategory,
+} from '../../services/expenses.service.js';
 import { handleRequest } from '../../services/queries.service.js';
 import { formatMoney } from '../../utils/format.js';
-import { isBudgetRequest, isCategoryRequest } from '../../utils/nlp.js';
+import { createLogger } from '../../utils/logger.js';
+import {
+  isBudgetRequest,
+  isCategoryRequest,
+  parseMoneyPhrase,
+  resolveCategorySlug,
+  slugifyCategory,
+} from '../../utils/nlp.js';
+import { takePendingEdit, type PendingEdit } from '../pending-edit.js';
+
+const log = createLogger('bot:shared');
+
+/**
+ * Confianza minima para anotar un gasto sin preguntar.
+ *
+ * Los gastos claros vuelven con 0.98-0.99 y una salida mal formada cae a 0.5
+ * (el valor por defecto del esquema), asi que 0.7 separa bien los dos casos.
+ * Debajo de este umbral se pide confirmacion: una transcripcion de audio mal
+ * interpretada podria crear un gasto que el usuario nunca quiso.
+ */
+const CONFIDENCE_THRESHOLD = 0.7;
 
 /** Da de alta o actualiza al usuario que envio el mensaje. */
 export async function resolveUser(ctx: Context): Promise<User | null> {
@@ -48,7 +78,7 @@ export async function replyExpense(
   sourceType: ExpenseSourceType,
   rawInput: string,
   aiModel: string,
-  telegramMessageId: number,
+  telegramMessageId: number | null,
 ): Promise<void> {
   const { expense, category } = await createExpenseFromParsed({
     user,
@@ -71,21 +101,67 @@ export async function replyExpense(
 }
 
 /**
- * Rutea un texto libre (escrito o transcripto de un audio):
- *   1. si es un gasto -> lo registra;
- *   2. si no -> lo interpreta como consulta, presupuesto o categoria;
- *   3. si no entiende nada -> pide que reformule.
+ * Rutea un texto libre (escrito o transcripto de un audio).
  *
- * Es el punto de entrada comun de los handlers de texto y de audio, asi ambos
- * canales entienden exactamente lo mismo.
+ * Un MISMO mensaje puede traer varias instrucciones (tipico en audio: "gasté
+ * 3500 en el super y cuánto llevo este mes"): se parten y se resuelven una por
+ * una. Si el modelo no puede separarlas, se trata como una sola.
+ *
+ * Tambien intercepta la respuesta a una edicion pendiente ("¿cuál es el monto
+ * nuevo?"): en ese caso el texto ES el valor a aplicar, no una instruccion.
  */
 export async function handleFreeText(
   ctx: Context,
   user: User,
   text: string,
   sourceType: ExpenseSourceType,
-  telegramMessageId: number,
+  telegramMessageId: number | null,
   /** Texto transcripto: se muestra solo si NO pudimos interpretarlo (audio). */
+  heardText?: string,
+): Promise<void> {
+  // Si el usuario venia de tocar "cambiar el monto/categoría", este mensaje es
+  // el valor nuevo.
+  const pending = takePendingEdit(user.id);
+  if (pending !== null) {
+    await applyPendingEdit(ctx, user, pending, text);
+    return;
+  }
+
+  const segments = await splitInstructions(text);
+
+  if (segments.length <= 1) {
+    await handleInstruction(ctx, user, text, sourceType, telegramMessageId, heardText);
+    return;
+  }
+
+  if (heardText !== undefined) {
+    await ctx.reply(`🎙️ Te escuché: «${heardText}»\nVoy con ${segments.length} cosas 👇`);
+  }
+
+  // Solo la PRIMERA instruccion conserva el id del mensaje: el indice unico
+  // (user_id, telegram_message_id) no admite dos gastos del mismo mensaje, y asi
+  // un reintento de Telegram no duplica el primero.
+  let index = 0;
+  for (const segment of segments) {
+    await handleInstruction(
+      ctx,
+      user,
+      segment,
+      sourceType,
+      index === 0 ? telegramMessageId : null,
+      undefined,
+    );
+    index += 1;
+  }
+}
+
+/** Resuelve UNA instruccion: gasto, o consulta / presupuesto / categoria. */
+async function handleInstruction(
+  ctx: Context,
+  user: User,
+  text: string,
+  sourceType: ExpenseSourceType,
+  telegramMessageId: number | null,
   heardText?: string,
 ): Promise<void> {
   // Un pedido de presupuesto o de categoria NO es un gasto, aunque mencione un
@@ -101,12 +177,74 @@ export async function handleFreeText(
 
   const answer = await handleRequest(user, text);
   if (answer !== null) {
-    await ctx.reply(answer);
+    await replyAnswer(ctx, answer);
     return;
   }
 
   await ctx.reply(
     heardText === undefined ? UNKNOWN_TEXT : `🎙️ Te escuché: «${heardText}»\n\n${UNKNOWN_TEXT}`,
+  );
+}
+
+/** Responde un `Answer`, convirtiendo sus botones en un teclado de Telegram. */
+export async function replyAnswer(ctx: Context, answer: Answer): Promise<void> {
+  if (answer.buttons === undefined) {
+    await ctx.reply(answer.text);
+    return;
+  }
+
+  const rows = answer.buttons.map((row) =>
+    row.map((item) => Markup.button.callback(item.text, item.data)),
+  );
+  await ctx.reply(answer.text, Markup.inlineKeyboard(rows));
+}
+
+/** Aplica la edicion pendiente con el texto que mando el usuario. */
+async function applyPendingEdit(
+  ctx: Context,
+  user: User,
+  pending: PendingEdit,
+  text: string,
+): Promise<void> {
+  if (pending.field === 'amount') {
+    // El monto se parsea en codigo, no con IA: es un numero y no hace falta
+    // gastar una llamada al modelo.
+    const amount = parseMoneyPhrase(text);
+    if (amount === null || amount <= 0) {
+      await ctx.reply('No te entendí el monto 😅 Tocá /editar y probamos de nuevo.');
+      return;
+    }
+
+    const result = await editExpenseAmount(user.id, pending.expenseId, amount);
+    await ctx.reply(
+      result.edited && result.expense !== null
+        ? `✅ Corregido: ahora son ${formatMoney(result.expense.amount, result.expense.currency)}.`
+        : (result.reason ?? 'No pude editar el gasto.'),
+    );
+    return;
+  }
+
+  // Categoria: se resuelve con los alias y con las categorias propias.
+  const slug = resolveCategorySlug(text) ?? slugifyCategory(text);
+  const category = slug === null ? null : await findForUserBySlug(user.id, slug);
+
+  if (category === null) {
+    const categories = await listAvailableCategories(user.id);
+    await ctx.reply(
+      [
+        `No tengo ninguna categoría "${text}" 🤔`,
+        `Tengo: ${categories.map((item) => item.slug).join(', ')}.`,
+      ].join('\n'),
+    );
+    return;
+  }
+
+  const result = await editExpenseCategory(user.id, pending.expenseId, category.id);
+  const label = `${category.emoji ?? ''} ${category.name}`.trim();
+  await ctx.reply(
+    result.edited
+      ? `✅ Corregido: ahora está en ${label}.`
+      : (result.reason ?? 'No pude editar el gasto.'),
   );
 }
 
@@ -123,10 +261,12 @@ export const UNKNOWN_TEXT = [
 /**
  * Registra un gasto como PENDIENTE y pide confirmacion con botones.
  *
- * Se usa en el flujo de foto de ticket: la IA puede leer mal el monto (o no ser
- * un ticket), asi que nada queda confirmado sin que la persona lo valide. Se
- * guarda con estado `pending` en la base en lugar de guardarlo en memoria: si
- * el bot se reinicia entre la foto y el toque del boton, el gasto sigue estando.
+ * Se usa en dos casos: la foto de un ticket (la IA puede leer mal el monto) y un
+ * gasto interpretado con BAJA confianza (tipico de una transcripcion de audio
+ * confusa). En ambos, nada queda confirmado sin que la persona lo valide.
+ *
+ * Se guarda con estado `pending` en la base en lugar de guardarlo en memoria: si
+ * el bot se reinicia entre el mensaje y el toque del boton, el gasto sigue estando.
  *
  * @returns El gasto creado, para poder diagnosticar desde el handler.
  */
@@ -137,7 +277,7 @@ export async function replyExpensePending(
   sourceType: ExpenseSourceType,
   rawInput: string,
   aiModel: string,
-  telegramMessageId: number,
+  telegramMessageId: number | null,
 ): Promise<Expense> {
   const { expense, category } = await createExpenseFromParsed({
     user,
@@ -156,7 +296,7 @@ export async function replyExpensePending(
     .join(' · ');
 
   const lines = [
-    '🧾 Leí el ticket:',
+    '🤔 Esto entendí:',
     '',
     `💸 ${formatMoney(expense.amount, expense.currency)} en ${label}`,
   ];
@@ -179,14 +319,19 @@ export async function replyExpensePending(
 /**
  * Interpreta un texto y, si describe un gasto, lo registra y responde.
  *
- * @returns `true` si se registro un gasto; `false` si el texto no era un gasto.
+ * Con confianza BAJA no se anota de una: se guarda como pendiente y se pide
+ * confirmacion. Es la red de seguridad contra una transcripcion de audio mal
+ * interpretada, que crearia un gasto que el usuario nunca quiso.
+ *
+ * @returns `true` si se registro (o se dejo pendiente) un gasto; `false` si el
+ *          texto no era un gasto.
  */
 export async function logExpenseFromText(
   ctx: Context,
   user: User,
   text: string,
   sourceType: ExpenseSourceType,
-  telegramMessageId: number,
+  telegramMessageId: number | null,
 ): Promise<boolean> {
   const parsed = await parseExpenseFromText({
     text,
@@ -199,6 +344,37 @@ export async function logExpenseFromText(
 
   if (parsed === null) {
     return false;
+  }
+
+  if (parsed.confidence < CONFIDENCE_THRESHOLD) {
+    log.warn('Extraccion con baja confianza: se pide confirmacion', {
+      confidence: parsed.confidence,
+      sourceType,
+      text,
+    });
+
+    if (telegramMessageId !== null) {
+      await replyExpensePending(
+        ctx,
+        user,
+        parsed,
+        sourceType,
+        text,
+        env.REASONING_MODEL,
+        telegramMessageId,
+      );
+      return true;
+    }
+
+    // Sin id de mensaje (2do o posterior segmento de un mensaje multiple) no se
+    // puede usar el flujo pendiente, que se apoya en el indice unico de Telegram.
+    await ctx.reply(
+      [
+        `🤔 No estoy seguro de haber entendido esto: «${text}»`,
+        'Mandámelo solo, en un mensaje aparte, y te lo confirmo.',
+      ].join('\n'),
+    );
+    return true;
   }
 
   await replyExpense(ctx, user, parsed, sourceType, text, env.REASONING_MODEL, telegramMessageId);
