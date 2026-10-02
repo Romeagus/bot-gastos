@@ -4,23 +4,24 @@
  * Archivo : src/bot/handlers/budget.handler.ts
  *
  * Uso:
- *   /presupuesto                          -> lista los presupuestos del mes
- *   /presupuesto supermercado 50000       -> fija el presupuesto del mes actual
+ *   /presupuesto                  -> lista los presupuestos del mes
+ *   /presupuesto super 50000      -> fija el presupuesto del mes actual
+ *   /presupuesto nafta 50 lucas   -> acepta alias y montos coloquiales
+ *
+ * Tambien se puede pedir en lenguaje natural ("presupuesto de 50 lucas en super"):
+ * de eso se encarga queries.service.
  */
 
 import type { Telegraf } from 'telegraf';
 import { listActiveForPeriod, upsertBudget } from '../../db/repositories/budgets.repo.js';
 import { findSystemBySlug, listSystem } from '../../db/repositories/categories.repo.js';
-import { STANDARD_CATEGORY_SLUGS, type StandardCategorySlug } from '../../domain/types/expense.js';
-import { formatAmount, parseAmount } from '../../utils/format.js';
+import { STANDARD_CATEGORY_SLUGS } from '../../domain/types/expense.js';
+import { formatAmount } from '../../utils/format.js';
 import { createLogger } from '../../utils/logger.js';
+import { parseMoneyPhrase, resolveCategorySlug } from '../../utils/nlp.js';
 import { resolveUser } from './shared.js';
 
 const log = createLogger('bot:budget');
-
-function isStandardSlug(value: string): value is StandardCategorySlug {
-  return (STANDARD_CATEGORY_SLUGS as readonly string[]).includes(value);
-}
 
 /** Registra el comando /presupuesto. */
 export function registerBudgetHandler(bot: Telegraf): void {
@@ -65,16 +66,20 @@ export function registerBudgetHandler(bot: Telegraf): void {
 
       // Con argumentos: alta/actualizacion.
       const [rawSlug, rawAmount] = args;
-      const slug = (rawSlug ?? '').toLowerCase();
+      const slug = resolveCategorySlug(rawSlug ?? '');
 
-      if (!isStandardSlug(slug)) {
-        await ctx.reply(`Categoria invalida. Usa una de: ${STANDARD_CATEGORY_SLUGS.join(', ')}`);
+      if (slug === null) {
+        await ctx.reply(
+          `No reconocí esa categoría. Probá con: ${STANDARD_CATEGORY_SLUGS.join(', ')} (o alias como "super", "nafta", "luz").`,
+        );
         return;
       }
 
-      const amount = parseAmount(rawAmount ?? '');
+      const amount = parseMoneyPhrase(rawAmount ?? '');
       if (amount === null || amount <= 0) {
-        await ctx.reply('Monto invalido. Ejemplo: /presupuesto supermercado 50000');
+        await ctx.reply(
+          'No entendí el monto. Ejemplos: /presupuesto super 50000 · /presupuesto nafta 50 lucas',
+        );
         return;
       }
 

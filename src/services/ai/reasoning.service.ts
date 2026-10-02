@@ -40,6 +40,7 @@ const SYSTEM_PROMPT = [
   '',
   'Reglas:',
   '- Si el mensaje NO describe un gasto (un saludo, una consulta), devolvé {"amount": 0, "confidence": 0}.',
+  '- Si el mensaje habla de FIJAR UN PRESUPUESTO o LIMITE (menciona "presupuesto", "límite", "limitá" o "tope"), NO es un gasto: devolvé {"amount": 0, "confidence": 0}.',
   '- No inventes montos ni comercios que no aparezcan en el mensaje.',
   '- Interpretá los montos en formato local: "3.500,50" es 3500.50 y "3,500.50" es 3500.50.',
   '- Si no se menciona el medio de pago, usá "other".',

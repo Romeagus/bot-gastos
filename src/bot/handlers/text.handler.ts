@@ -5,8 +5,9 @@
  */
 
 import type { Telegraf } from 'telegraf';
-import { answerQuestion } from '../../services/queries.service.js';
+import { handleRequest } from '../../services/queries.service.js';
 import { createLogger } from '../../utils/logger.js';
+import { isBudgetRequest } from '../../utils/nlp.js';
 import { logExpenseFromText, resolveUser } from './shared.js';
 
 const log = createLogger('bot:text');
@@ -28,14 +29,18 @@ export function registerTextHandler(bot: Telegraf): void {
         return;
       }
 
-      const registered = await logExpenseFromText(ctx, user, text, 'text', ctx.message.message_id);
+      // Un pedido de presupuesto NO es un gasto (aunque mencione monto y
+      // categoria): lo resolvemos por el camino conversacional.
+      const registered = isBudgetRequest(text)
+        ? false
+        : await logExpenseFromText(ctx, user, text, 'text', ctx.message.message_id);
 
       if (registered) {
         return;
       }
 
-      // No era un gasto: probamos si es una consulta ("cuanto gaste este mes").
-      const answer = await answerQuestion(user, text);
+      // No era un gasto: lo interpretamos como consulta o pedido de presupuesto.
+      const answer = await handleRequest(user, text);
       if (answer !== null) {
         await ctx.reply(answer);
         return;
@@ -43,9 +48,10 @@ export function registerTextHandler(bot: Telegraf): void {
 
       await ctx.reply(
         [
-          'No te entendi. Podes:',
-          '• registrarme un gasto: "gaste 3500 en el super"',
-          '• preguntarme: "cuanto gaste este mes"',
+          'No te entendí 🤔 Probá con alguna de estas:',
+          '• "gasté 3500 en el super"',
+          '• "cuánto gasté este mes"',
+          '• "presupuesto de 50 lucas en super"',
         ].join('\n'),
       );
     } catch (error) {

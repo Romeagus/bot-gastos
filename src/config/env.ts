@@ -74,7 +74,7 @@ const envSchema = z.object({
     .optional()
     .transform((value) => (value === undefined || value.trim() === '' ? undefined : value.trim())),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
-  VISION_MODEL: z.string().min(1).default('qwen/qwen-2.5-vl-72b-instruct'),
+  VISION_MODEL: z.string().min(1).default('qwen/qwen2.5-vl-72b-instruct'),
 
   // --- Razonamiento (texto -> gasto estructurado) -----------------------------
   // Cualquier API compatible con OpenAI. Por defecto Groq (plan gratuito).
