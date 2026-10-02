@@ -1,0 +1,163 @@
+# Bot Gastos — Anotador de Gastos Inteligente
+
+Asistente financiero conversacional para Telegram. Elimina la fricción del
+registro financiero diario mediante:
+
+1. **Registro por audio** — se transcribe (Groq / Whisper) y se normaliza a JSON.
+2. **Registro por foto** — tickets/comprobantes extraídos con un modelo de visión (Qwen2.5-VL).
+3. **Alertas preventivas** — avisos proactivos de presupuesto mensual por categoría.
+4. **Consultas en lenguaje natural** — preguntas sobre los consumos registrados.
+
+> Estado actual: **MVP funcional en construcción.** Ya funcionan el esquema de
+> base de datos, el registro de gastos por **texto** y por **audio**
+> (transcripción + estructuración a JSON) y la capa de IA. Pendientes: registro
+> por foto (visión), alertas de presupuesto y consultas en lenguaje natural.
+
+## Stack
+
+| Capa              | Tecnología                                   |
+| ----------------- | -------------------------------------------- |
+| Runtime           | Node.js (ESM) + TypeScript estricto          |
+| Framework del bot | Telegraf                                     |
+| Base de datos     | PostgreSQL (Supabase / Neon)                 |
+| Acceso a datos    | SQL directo tipado con `pg`                  |
+| Transcripción     | Groq API — `whisper-large-v3`                |
+| Visión / tickets  | OpenRouter — `qwen/qwen-2.5-vl-72b-instruct` |
+| Razonamiento      | API compatible con OpenAI (Groq / DeepSeek)  |
+
+Los proveedores de IA exponen una API compatible con OpenAI, por lo que se
+consumen con `fetch` nativo (Node 18+) en lugar de sumar SDKs.
+
+## Estructura del proyecto
+
+```
+bot-gastos/
+├─ db/
+│  ├─ schema.sql                 # DDL (fuente de verdad del modelo)
+│  └─ seeds/
+│     └─ 001_categories.sql      # categorías estándar
+├─ scripts/
+│  └─ apply-schema.ts            # runner de esquema + semillas
+├─ src/
+│  ├─ index.ts                   # entrada del proceso (bootstrap)
+│  ├─ config/
+│  │  └─ env.ts                  # lectura y validación de variables de entorno
+│  ├─ bot/
+│  │  ├─ bot.ts                  # instancia de Telegraf + middlewares globales
+│  │  ├─ handlers/               # comandos y mensajes (audio, foto, texto)
+│  │  ├─ middlewares/            # auth por usuario, logging, manejo de errores
+│  │  └─ keyboards/              # teclados inline/reply
+│  ├─ services/
+│  │  ├─ ai/
+│  │  │  ├─ transcription.service.ts   # Groq / Whisper
+│  │  │  ├─ vision.service.ts          # Qwen2.5-VL (tickets)
+│  │  │  └─ reasoning.service.ts       # DeepSeek (estructuración a JSON)
+│  │  ├─ expenses.service.ts     # lógica de negocio de gastos
+│  │  ├─ budgets.service.ts      # lógica de negocio de presupuestos
+│  │  ├─ categories.service.ts   # resolución de categorías
+│  │  └─ alerts.service.ts       # cálculo/emisión de alertas
+│  ├─ db/
+│  │  ├─ client.ts               # Pool de conexiones (pg)
+│  │  └─ repositories/           # acceso a datos, una tabla por archivo
+│  ├─ domain/
+│  │  ├─ types/                  # tipos y DTOs del dominio
+│  │  └─ schemas/                # esquemas zod (validación de salidas de IA)
+│  ├─ jobs/                      # tareas programadas (alertas de presupuesto)
+│  └─ utils/                     # logger, errores, helpers de dinero/fechas
+├─ tests/
+├─ .env.example
+├─ eslint.config.js
+├─ tsconfig.json
+└─ package.json
+```
+
+## Setup
+
+```bash
+npm install          # instala dependencias de package.json
+cp .env.example .env # completar TELEGRAM_BOT_TOKEN y DATABASE_URL
+npm run db:apply     # crea tablas (schema.sql) y carga semillas
+npm run dev          # levanta el bot en modo watch (tsx)
+```
+
+### Scripts disponibles
+
+| Script              | Descripción                                           |
+| ------------------- | ----------------------------------------------------- |
+| `npm run dev`       | Ejecuta el bot con recarga en caliente (`tsx watch`). |
+| `npm run build`     | Compila TypeScript a `dist/`.                         |
+| `npm run start`     | Ejecuta la build (`node dist/index.js`).              |
+| `npm run typecheck` | Chequeo de tipos sin emitir.                          |
+| `npm run db:apply`  | Aplica `db/schema.sql` y los seeds.                   |
+| `npm run db:verify` | Verifica esquema y repositorios contra la base real.  |
+| `npm run lint`      | ESLint.                                               |
+| `npm run format`    | Prettier.                                             |
+
+### Aplicar el esquema sin Node
+
+```bash
+psql "$DATABASE_URL" -f db/schema.sql
+psql "$DATABASE_URL" -f db/seeds/001_categories.sql
+```
+
+En Supabase, también se puede pegar el contenido de `db/schema.sql` en el **SQL Editor**.
+
+## Despliegue (para usar el bot desde cualquier dispositivo)
+
+El bot usa **long polling**, así que **no necesita puerto ni URL pública**: solo
+un proceso corriendo 24/7 en algún host.
+
+### 1. Llevar el código a un repo
+
+```bash
+git init
+git add .
+git commit -m "Bot de gastos"
+# crear el repo en GitHub y luego:
+git remote add origin <url-del-repo>
+git push -u origin main
+```
+
+> `.gitignore` ya excluye `.env`, `node_modules` y `dist`. Verificá que `.env`
+> **no** se suba.
+
+### 2. Opciones de hosting
+
+| Opción      | Cómo                                                                                                | Notas                                                                 |
+| ----------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Railway** | New Project → Deploy from GitHub → cargar variables                                                 | Detecta el `Dockerfile` solo.                                         |
+| **Render**  | New → **Background Worker** (runtime Docker)                                                        | Los _Web Services_ exigen un puerto abierto: usar **Worker**, no Web. |
+| **Fly.io**  | `fly launch` (detecta el `Dockerfile`) + `fly secrets set ...`                                      | Buen plan gratuito.                                                   |
+| **VPS**     | `docker build -t bot-gastos . && docker run -d --env-file .env --restart unless-stopped bot-gastos` | Control total, sirve cualquier hosting con Docker.                    |
+
+### 3. Variables de entorno en el host
+
+Cargar en el panel del proveedor las mismas del `.env`:
+
+```ini
+NODE_ENV=production
+TELEGRAM_BOT_TOKEN=...
+DATABASE_URL=...
+GROQ_API_KEY=...
+REASONING_PROVIDER=groq
+REASONING_API_KEY=...
+REASONING_BASE_URL=https://api.groq.com/openai/v1
+REASONING_MODEL=openai/gpt-oss-120b
+OPENROUTER_API_KEY=...        # opcional: habilita la lectura de tickets
+```
+
+### 4. Aplicar el esquema (una sola vez)
+
+Desde tu máquina, contra la base en la nube:
+
+```bash
+npm run db:apply
+npm run db:verify
+```
+
+### 5. ⚠️ Un solo proceso a la vez
+
+Telegram permite **un único consumidor de long polling** por token. Si dejás el
+bot corriendo en tu PC **y** en el servidor al mismo tiempo, se "roban" los
+updates entre sí y vas a ver errores `409 Conflict`. Para probar desde el
+celular, **apagá el proceso local** (`Ctrl+C`).
