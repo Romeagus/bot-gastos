@@ -3,8 +3,8 @@
 Asistente financiero conversacional para Telegram. Elimina la fricción del
 registro financiero diario mediante:
 
-1. **Registro por texto, audio o foto** — el texto y el audio se interpretan
-   (Groq) y el ticket se extrae con un modelo de visión (Qwen2.5-VL).
+1. **Registro por texto, audio o foto** — el texto y el audio se interpretan con
+   Groq (Whisper para el audio) y el ticket se lee con un modelo de visión.
 2. **Consultas en lenguaje natural** — "cuánto gasté este mes", "en qué gasté más".
 3. **Topes por categoría con avance** — límite mensual, cuánto llevás gastado y
    cuánto te queda.
@@ -14,15 +14,16 @@ registro financiero diario mediante:
    para anotar gastos como para ponerles un tope.
 
 > Estado actual: **MVP funcional.** Registro (texto / audio / foto), consultas,
-> topes con alertas y categorías propias funcionan de punta a punta. La lectura
-> de tickets necesita `OPENROUTER_API_KEY`.
+> topes con alertas y categorías propias funcionan de punta a punta. Los tickets
+> se leen con el modelo de visión de Groq (misma cuenta que el audio) y el gasto
+> **siempre se confirma con botones** antes de quedar anotado.
 
 ### Cómo se usa
 
 | Querés…             | Decí o mandá                                                           |
 | ------------------- | ---------------------------------------------------------------------- |
 | Anotar un gasto     | `gasté 3500 en el super` · `cargué 20 lucas de nafta` · un audio 🎙️    |
-| Anotar un ticket    | una foto del ticket 📸                                                 |
+| Anotar un ticket    | una foto del ticket 📸 (el bot te muestra lo que leyó y **confirmás**) |
 | Consultar           | `cuánto gasté este mes` · `cuánto gasté en super` · `en qué gasté más` |
 | Ver tus topes       | `cómo vienen mis topes`                                                |
 | Fijar un tope       | `presupuesto de 50 lucas en super`                                     |
@@ -40,7 +41,7 @@ registro financiero diario mediante:
 | Base de datos     | PostgreSQL (Supabase / Neon)                |
 | Acceso a datos    | SQL directo tipado con `pg`                 |
 | Transcripción     | Groq API — `whisper-large-v3`               |
-| Visión / tickets  | OpenRouter — `qwen/qwen2.5-vl-72b-instruct` |
+| Visión / tickets  | Groq API — `qwen/qwen3.8-27b`               |
 | Razonamiento      | API compatible con OpenAI (Groq / DeepSeek) |
 
 Los proveedores de IA exponen una API compatible con OpenAI, por lo que se
@@ -68,7 +69,7 @@ bot-gastos/
 │  ├─ services/
 │  │  ├─ ai/
 │  │  │  ├─ transcription.service.ts   # Groq / Whisper
-│  │  │  ├─ vision.service.ts          # Qwen2.5-VL (tickets)
+│  │  │  ├─ vision.service.ts          # Groq / Qwen (tickets)
 │  │  │  └─ reasoning.service.ts       # DeepSeek (estructuración a JSON)
 │  │  ├─ expenses.service.ts     # lógica de negocio de gastos
 │  │  ├─ budgets.service.ts      # lógica de negocio de presupuestos
@@ -162,7 +163,8 @@ REASONING_PROVIDER=groq
 REASONING_API_KEY=...
 REASONING_BASE_URL=https://api.groq.com/openai/v1
 REASONING_MODEL=openai/gpt-oss-120b
-OPENROUTER_API_KEY=...        # opcional: habilita la lectura de tickets
+# La visión reutiliza GROQ_API_KEY, así que no hace falta ninguna variable más.
+# Para otro proveedor: VISION_PROVIDER / VISION_BASE_URL / VISION_MODEL / VISION_API_KEY.
 ```
 
 ### 4. Aplicar el esquema (una sola vez)

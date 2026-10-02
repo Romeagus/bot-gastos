@@ -9,13 +9,18 @@
  */
 
 import { findForUserBySlug } from '../db/repositories/categories.repo.js';
-import { createExpense } from '../db/repositories/expenses.repo.js';
+import {
+  createExpense,
+  findById,
+  updateStatusForUser,
+} from '../db/repositories/expenses.repo.js';
 import type { ParsedExpense } from '../domain/schemas/parsed-expense.schema.js';
 import type { Category } from '../domain/types/category.js';
 import {
   FALLBACK_CATEGORY_SLUG,
   type Expense,
   type ExpenseSourceType,
+  type ExpenseStatus,
 } from '../domain/types/expense.js';
 import type { User } from '../domain/types/user.js';
 import { createLogger } from '../utils/logger.js';
@@ -31,6 +36,12 @@ export interface BuildExpenseInput {
   readonly telegramMessageId?: number | null;
   /** Fecha por defecto si el modelo no detecto `spent_at`. */
   readonly fallbackSpentAt?: Date;
+  /**
+   * Estado inicial. Por defecto `confirmed`: el usuario escribio o dicto el
+   * gasto, asi que esta claro. El flujo de foto de ticket usa `pending` hasta
+   * que la persona confirma lo que la IA interpreto.
+   */
+  readonly status?: ExpenseStatus;
 }
 
 export interface CreatedExpense {
@@ -73,8 +84,7 @@ export async function createExpenseFromParsed(input: BuildExpenseInput): Promise
     paymentMethod: input.parsed.payment_method,
     spentAt,
     sourceType: input.sourceType,
-    // El usuario enuncio el gasto y lo registramos: queda confirmado.
-    status: 'confirmed',
+    status: input.status ?? 'confirmed',
     rawInput: input.rawInput,
     rawPayload: input.parsed,
     aiModel: input.aiModel,
@@ -89,4 +99,56 @@ export async function createExpenseFromParsed(input: BuildExpenseInput): Promise
   });
 
   return { expense, category };
+}
+
+export interface StatusChangeResult {
+  /** `true` si el estado cambio en este llamado. */
+  readonly changed: boolean;
+  readonly expense: Expense | null;
+  /** Explicacion cuando no se pudo aplicar (para responderle al usuario). */
+  readonly reason?: string;
+}
+
+/**
+ * Aplica un cambio de estado solo si el gasto sigue `pending`.
+ *
+ * La guarda de `pending` vuelve idempotente al flujo: si el usuario toca dos
+ * veces el boton, el segundo toque no produce ningun cambio.
+ */
+async function changePendingStatus(
+  userId: string,
+  expenseId: string,
+  status: ExpenseStatus,
+): Promise<StatusChangeResult> {
+  const expense = await findById(expenseId);
+
+  // El chequeo de dueno es de seguridad: el boton no debe tocar gastos ajenos.
+  if (expense === null || expense.userId !== userId) {
+    return { changed: false, expense: null, reason: 'No encontré ese gasto.' };
+  }
+
+  if (expense.status !== 'pending') {
+    return { changed: false, expense, reason: 'Ese gasto ya estaba resuelto.' };
+  }
+
+  const updated = await updateStatusForUser(userId, expenseId, status);
+  return updated === null
+    ? { changed: false, expense, reason: 'No pude actualizar el gasto.' }
+    : { changed: true, expense: updated };
+}
+
+/** Confirma un gasto pendiente (el usuario valido lo que interpreto la IA). */
+export async function confirmExpense(
+  userId: string,
+  expenseId: string,
+): Promise<StatusChangeResult> {
+  return changePendingStatus(userId, expenseId, 'confirmed');
+}
+
+/** Descarta un gasto pendiente (la IA leyo mal o no era un gasto). */
+export async function rejectExpense(
+  userId: string,
+  expenseId: string,
+): Promise<StatusChangeResult> {
+  return changePendingStatus(userId, expenseId, 'rejected');
 }

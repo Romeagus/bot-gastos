@@ -7,10 +7,10 @@
  * "texto interpretado -> gasto persistido -> respuesta".
  */
 
-import type { Context } from 'telegraf';
+import { Markup, type Context } from 'telegraf';
 import { env } from '../../config/env.js';
 import type { ParsedExpense } from '../../domain/schemas/parsed-expense.schema.js';
-import type { ExpenseSourceType } from '../../domain/types/expense.js';
+import type { Expense, ExpenseSourceType } from '../../domain/types/expense.js';
 import type { User } from '../../domain/types/user.js';
 import { upsertByTelegramId } from '../../db/repositories/users.repo.js';
 import { parseExpenseFromText } from '../../services/ai/reasoning.service.js';
@@ -110,7 +110,7 @@ export async function handleFreeText(
   );
 }
 
-/** Respuesta cuando el mensaje no es ni un gasto ni algo que sepamos responder. */
+/** Texto accionable cuando el mensaje no es ni un gasto ni algo que sepamos responder. */
 export const UNKNOWN_TEXT = [
   'Mmm, no te entendí 🤔 Probá con algo de esto:',
   '',
@@ -119,6 +119,62 @@ export const UNKNOWN_TEXT = [
   '• "presupuesto de 50 lucas en super"',
   '• "creá la categoría gimnasio"',
 ].join('\n');
+
+/**
+ * Registra un gasto como PENDIENTE y pide confirmacion con botones.
+ *
+ * Se usa en el flujo de foto de ticket: la IA puede leer mal el monto (o no ser
+ * un ticket), asi que nada queda confirmado sin que la persona lo valide. Se
+ * guarda con estado `pending` en la base en lugar de guardarlo en memoria: si
+ * el bot se reinicia entre la foto y el toque del boton, el gasto sigue estando.
+ *
+ * @returns El gasto creado, para poder diagnosticar desde el handler.
+ */
+export async function replyExpensePending(
+  ctx: Context,
+  user: User,
+  parsed: ParsedExpense,
+  sourceType: ExpenseSourceType,
+  rawInput: string,
+  aiModel: string,
+  telegramMessageId: number,
+): Promise<Expense> {
+  const { expense, category } = await createExpenseFromParsed({
+    user,
+    parsed,
+    sourceType,
+    rawInput,
+    aiModel,
+    telegramMessageId,
+    status: 'pending',
+  });
+
+  const label =
+    category === null ? 'Sin categoría' : `${category.emoji ?? ''} ${category.name}`.trim();
+  const detail = [expense.merchant, expense.description]
+    .filter((value) => value !== null && value !== '')
+    .join(' · ');
+
+  const lines = [
+    '🧾 Leí el ticket:',
+    '',
+    `💸 ${formatMoney(expense.amount, expense.currency)} en ${label}`,
+  ];
+  if (detail !== '') {
+    lines.push(`🏪 ${detail}`);
+  }
+  lines.push('', '¿Lo anoto?');
+
+  await ctx.reply(
+    lines.join('\n'),
+    Markup.inlineKeyboard([
+      Markup.button.callback('✅ Sí', `exp:${expense.id}:y`),
+      Markup.button.callback('❌ No', `exp:${expense.id}:n`),
+    ]),
+  );
+
+  return expense;
+}
 
 /**
  * Interpreta un texto y, si describe un gasto, lo registra y responde.

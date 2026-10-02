@@ -118,6 +118,31 @@ export async function findById(id: string): Promise<Expense | null> {
   return row === undefined ? null : toExpense(row);
 }
 
+/**
+ * Cambia el estado de un gasto, acotado a su dueno.
+ *
+ * El filtro por `user_id` no es decorativo: impide que un boton de confirmacion
+ * de otra persona pueda modificar un gasto ajeno.
+ *
+ * @returns El gasto actualizado, o `null` si no existe o no es del usuario.
+ */
+export async function updateStatusForUser(
+  userId: string,
+  id: string,
+  status: ExpenseStatus,
+): Promise<Expense | null> {
+  const { rows } = await query<ExpenseRow>(
+    `UPDATE expenses
+        SET status = $3
+      WHERE id = $2 AND user_id = $1
+      RETURNING ${EXPENSE_COLUMNS}`,
+    [userId, id, status],
+  );
+
+  const row = rows[0];
+  return row === undefined ? null : toExpense(row);
+}
+
 /** Ultimos gastos de un usuario, del mas reciente al mas antiguo. */
 export async function listRecentByUser(userId: string, limit = 10): Promise<Expense[]> {
   const { rows } = await query<ExpenseRow>(

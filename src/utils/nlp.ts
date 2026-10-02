@@ -81,6 +81,28 @@ const CATEGORY_ALIASES: Record<string, StandardCategorySlug> = {
   otro: 'varios',
   otros: 'varios',
   misc: 'varios',
+  // --- Nombres en INGLES ------------------------------------------------------
+  // Los modelos de vision (y a veces los de texto) devuelven la categoria en
+  // ingles aunque el prompt pida espanol: se mapean para no perder el gasto.
+  groceries: 'supermercado',
+  grocery: 'supermercado',
+  supermarket: 'supermercado',
+  food: 'comida',
+  restaurant: 'comida',
+  dining: 'comida',
+  transport: 'transporte',
+  transportation: 'transporte',
+  fuel: 'transporte',
+  gasoline: 'transporte',
+  utilities: 'servicios',
+  services: 'servicios',
+  entertainment: 'salidas',
+  leisure: 'salidas',
+  nightlife: 'salidas',
+  hairdresser: 'peluqueria',
+  hairdressing: 'peluqueria',
+  barbershop: 'peluqueria',
+  other: 'varios',
 };
 
 /**

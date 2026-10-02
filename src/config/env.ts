@@ -66,15 +66,22 @@ const envSchema = z.object({
   GROQ_BASE_URL: z.string().url().default('https://api.groq.com/openai/v1'),
   GROQ_WHISPER_MODEL: z.string().min(1).default('whisper-large-v3'),
 
-  // --- OpenRouter (visión / extracción de tickets, Qwen2.5-VL) ---------------
-  // Opcional: si no hay key, el bot arranca igual y el handler de foto avisa
-  // que la funcion no esta configurada (los CHECKs de vision viven en el svc).
-  OPENROUTER_API_KEY: z
+  // --- Vision (fotos de tickets) ----------------------------------------------
+  // Cualquier API compatible con OpenAI que acepte imagenes. Por defecto Groq,
+  // que ya es el proveedor del audio: una sola cuenta y una sola key.
+  // Para usar OpenRouter en su lugar:
+  //   VISION_PROVIDER=openrouter
+  //   VISION_BASE_URL=https://openrouter.ai/api/v1
+  //   VISION_MODEL=qwen/qwen2.5-vl-72b-instruct
+  //   VISION_API_KEY=sk-or-...
+  VISION_PROVIDER: z.string().min(1).default('groq'),
+  /** Si no se define, se reutiliza GROQ_API_KEY (mismo proveedor por defecto). */
+  VISION_API_KEY: z
     .string()
     .optional()
     .transform((value) => (value === undefined || value.trim() === '' ? undefined : value.trim())),
-  OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
-  VISION_MODEL: z.string().min(1).default('qwen/qwen2.5-vl-72b-instruct'),
+  VISION_BASE_URL: z.string().url().default('https://api.groq.com/openai/v1'),
+  VISION_MODEL: z.string().min(1).default('qwen/qwen3.8-27b'),
 
   // --- Razonamiento (texto -> gasto estructurado) -----------------------------
   // Cualquier API compatible con OpenAI. Por defecto Groq (plan gratuito).
