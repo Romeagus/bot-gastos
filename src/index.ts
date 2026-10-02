@@ -66,10 +66,36 @@ async function main(): Promise<void> {
     { command: 'presupuesto', description: 'Ver o fijar presupuestos' },
   ]);
 
-  log.info('Iniciando long polling...');
-  // `launch()` resuelve recien cuando el bot se detiene (stop/SIGINT).
-  await bot.launch({ dropPendingUpdates: true });
-  log.info('Long polling finalizado');
+  // Telegram admite UNA sola instancia por token. Durante un redeploy el
+  // contenedor viejo puede tardar en soltar el long polling y el nuevo recibe
+  // "409 Conflict"; sin reintentos el proceso muere y entra en loop de reinicios.
+  const maxAttempts = 4;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      log.info(`Iniciando long polling (intento ${attempt}/${maxAttempts})`);
+      // `launch()` resuelve recien cuando el bot se detiene (stop/SIGINT).
+      await bot.launch({ dropPendingUpdates: true });
+      log.info('Long polling finalizado');
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (!message.includes('409')) {
+        throw error;
+      }
+
+      if (attempt === maxAttempts) {
+        throw new Error(
+          'No se pudo iniciar el long polling: Telegram sigue viendo otra instancia ' +
+            `con este token (409). Verificá que no haya otro bot corriendo. (${message})`,
+        );
+      }
+
+      log.warn('Telegram devolvio 409 (otra instancia todavia activa). Reintento en 5s...');
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+  }
 }
 
 async function run(): Promise<void> {
