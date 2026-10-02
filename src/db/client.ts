@@ -12,9 +12,16 @@
  *   const { rows } = await query<UserRow>('SELECT * FROM users WHERE id = $1', [id]);
  */
 
+import { setDefaultResultOrder } from 'node:dns';
 import { Pool, type PoolClient, type PoolConfig, type QueryResult, type QueryResultRow } from 'pg';
 import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
+
+// Preferir IPv4 al resolver nombres. Muchos hosts (Railway, Render, etc.) no
+// tienen salida IPv6, y Supabase publica registros AAAA para la conexion
+// directa (`db.<ref>.supabase.co`), lo que produce "connect ENETUNREACH <ipv6>".
+// Si el host no tuviera registro A, Node cae igualmente a IPv6.
+setDefaultResultOrder('ipv4first');
 
 const log = createLogger('db');
 

@@ -9,11 +9,15 @@
  * Es un utilitario de operación, NO lógica del bot.
  */
 
+import { setDefaultResultOrder } from 'node:dns';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 import { Client } from 'pg';
+
+// Preferir IPv4 (ver comentario en src/db/client.ts).
+setDefaultResultOrder('ipv4first');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(here, '..');
