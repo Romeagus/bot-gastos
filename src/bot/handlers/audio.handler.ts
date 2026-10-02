@@ -11,7 +11,7 @@ import type { Context, Telegraf } from 'telegraf';
 import { transcribeAudio } from '../../services/ai/transcription.service.js';
 import { AiProviderError } from '../../utils/errors.js';
 import { createLogger } from '../../utils/logger.js';
-import { logExpenseFromText, resolveUser } from './shared.js';
+import { handleFreeText, resolveUser } from './shared.js';
 
 const log = createLogger('bot:audio');
 
@@ -55,7 +55,7 @@ async function handleAudio(
   try {
     const user = await resolveUser(ctx);
     if (user === null) {
-      await ctx.reply('No pude identificar tu usuario de Telegram. Proba de nuevo.');
+      await ctx.reply('No pude identificarte 😅 Probá de nuevo.');
       return;
     }
 
@@ -74,15 +74,13 @@ async function handleAudio(
     });
 
     if (text === '') {
-      await ctx.reply('No pude entender el audio. Proba grabando de nuevo.');
+      await ctx.reply('No te entendí el audio 😅 Probá grabando de nuevo.');
       return;
     }
 
-    const registered = await logExpenseFromText(ctx, user, text, 'audio', messageId);
-
-    if (!registered) {
-      await ctx.reply(`Te entendi: "${text}"\nPero no pude identificar un gasto.`);
-    }
+    // Mismo camino que el texto: gasto, consulta, presupuesto o categoria.
+    // Asi se puede preguntar y presupuestar tambien hablando.
+    await handleFreeText(ctx, user, text, 'audio', messageId, text);
   } catch (error) {
     // El `detail` trae la respuesta cruda del proveedor: es lo que permite
     // diagnosticar (ej. "invalid file format"). Antes no se logueaba.
@@ -92,14 +90,14 @@ async function handleAudio(
         detail: error.detail,
         error: error.message,
       });
-      await ctx.reply('No pude transcribir el audio. Proba de nuevo en un momento.');
+      await ctx.reply('No pude escuchar bien el audio 😔 Probá de nuevo en un momento.');
       return;
     }
 
     log.error('Fallo el handler de audio', {
       error: error instanceof Error ? error.message : String(error),
     });
-    await ctx.reply('Hubo un problema al procesar el audio. Intenta de nuevo en un momento.');
+    await ctx.reply('Uhh, algo se me rompió con el audio 🙈 Probá de nuevo en un momento.');
   }
 }
 

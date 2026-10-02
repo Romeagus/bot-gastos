@@ -37,9 +37,21 @@ export const STANDARD_CATEGORY_SLUGS = [
   'supermercado',
   'transporte',
   'servicios',
+  'peluqueria',
   'varios',
 ] as const;
 export type StandardCategorySlug = (typeof STANDARD_CATEGORY_SLUGS)[number];
+
+/** Descripcion corta de cada categoria: se inyecta en el prompt de la IA. */
+export const CATEGORY_HINTS: Record<StandardCategorySlug, string> = {
+  comida: 'comida, delivery, restaurante, almuerzo, cafeteria',
+  salidas: 'salidas, bar, boliche, cine, recital, birra',
+  supermercado: 'supermercado, almacen, verduleria, chino, compras de casa',
+  transporte: 'nafta, colectivo, sube, taxi, uber, peaje, estacionamiento',
+  servicios: 'luz, gas, agua, internet, telefono, alquiler, expensas, impuestos',
+  peluqueria: 'peluqueria, barberia, corte de pelo, color, unas, estetica',
+  varios: 'cualquier gasto que no encaje en las anteriores',
+};
 
 /** Slug de ultimo recurso cuando el modelo no puede clasificar el gasto. */
 export const FALLBACK_CATEGORY_SLUG: StandardCategorySlug = 'varios';

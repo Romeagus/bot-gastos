@@ -17,8 +17,8 @@ import { replyExpense, resolveUser } from './shared.js';
 const log = createLogger('bot:photo');
 
 const NOT_CONFIGURED = [
-  'La lectura de tickets todavia no esta configurada.',
-  'Mientras tanto, podes escribirmelo ("gaste 3500 en el super") o mandarme un audio.',
+  'La lectura de tickets todavía no está configurada 🙈',
+  'Mientras tanto, escribímelo ("gasté 3500 en el super") o mandame un audio.',
 ].join('\n');
 
 /** Registra el handler de fotos. */

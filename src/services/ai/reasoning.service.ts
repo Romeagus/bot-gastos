@@ -14,6 +14,7 @@ import {
   type ParsedExpense,
 } from '../../domain/schemas/parsed-expense.schema.js';
 import {
+  CATEGORY_HINTS,
   FALLBACK_CATEGORY_SLUG,
   PAYMENT_METHODS,
   STANDARD_CATEGORY_SLUGS,
@@ -23,30 +24,53 @@ import { chatCompletion } from './openai-compatible.client.js';
 
 const log = createLogger('ai:reasoning');
 
-const SYSTEM_PROMPT = [
-  'Sos un extractor de gastos. Recibís un mensaje en español rioplatense y devolvés SOLO un objeto JSON.',
-  '',
-  'Formato exacto:',
-  '{',
-  '  "amount": number,             // monto total del gasto, siempre positivo',
-  '  "currency": string,           // código ISO 4217 de 3 letras (ej. "ARS", "USD")',
-  `  "category_slug": string,      // una de: ${STANDARD_CATEGORY_SLUGS.join(', ')}`,
-  '  "merchant": string | null,    // comercio o persona, o null si no se menciona',
-  '  "description": string | null, // detalle breve, o null',
-  `  "payment_method": string,     // uno de: ${PAYMENT_METHODS.join(', ')}`,
-  '  "spent_at": string | null,    // fecha ISO 8601 si se menciona (ej. "2026-09-30"), o null',
-  '  "confidence": number          // 0 a 1: qué tan seguro estás de la extracción',
-  '}',
-  '',
-  'Reglas:',
-  '- Si el mensaje NO describe un gasto (un saludo, una consulta), devolvé {"amount": 0, "confidence": 0}.',
-  '- Si el mensaje habla de FIJAR UN PRESUPUESTO o LIMITE (menciona "presupuesto", "límite", "limitá" o "tope"), NO es un gasto: devolvé {"amount": 0, "confidence": 0}.',
-  '- No inventes montos ni comercios que no aparezcan en el mensaje.',
-  '- Interpretá los montos en formato local: "3.500,50" es 3500.50 y "3,500.50" es 3500.50.',
-  '- Si no se menciona el medio de pago, usá "other".',
-  `- Si dudás de la categoría, usá "${FALLBACK_CATEGORY_SLUG}".`,
-  '- No agregues texto fuera del JSON.',
-].join('\n');
+/**
+ * Arma la lista de categorias que se le ofrecen al modelo, con una pista de que
+ * entra en cada una. Incluye las categorias propias del usuario.
+ */
+function buildCategoryCatalog(slugs: readonly string[]): string {
+  const hints: Readonly<Record<string, string>> = CATEGORY_HINTS;
+  return slugs
+    .map((slug) => {
+      const hint = hints[slug];
+      return hint === undefined
+        ? `  - ${slug}: categoría propia del usuario`
+        : `  - ${slug}: ${hint}`;
+    })
+    .join('\n');
+}
+
+/** Prompt del extractor de gastos, con el catalogo real de categorias. */
+function buildSystemPrompt(categorySlugs: readonly string[]): string {
+  return [
+    'Sos un extractor de gastos. Recibís un mensaje en español rioplatense y devolvés SOLO un objeto JSON.',
+    '',
+    'Formato exacto:',
+    '{',
+    '  "amount": number,             // monto total del gasto, siempre positivo',
+    '  "currency": string,           // código ISO 4217 de 3 letras (ej. "ARS", "USD")',
+    '  "category_slug": string,      // una de las categorías de la lista de abajo',
+    '  "merchant": string | null,    // comercio o persona, o null si no se menciona',
+    '  "description": string | null, // detalle breve, o null',
+    `  "payment_method": string,     // uno de: ${PAYMENT_METHODS.join(', ')}`,
+    '  "spent_at": string | null,    // fecha ISO 8601 si se menciona (ej. "2026-09-30"), o null',
+    '  "confidence": number          // 0 a 1: qué tan seguro estás de la extracción',
+    '}',
+    '',
+    'Categorías disponibles (elegí SIEMPRE una de estas, escribiendo el slug tal cual):',
+    buildCategoryCatalog(categorySlugs),
+    '',
+    'Reglas:',
+    '- Si el mensaje NO describe un gasto (un saludo, una consulta), devolvé {"amount": 0, "confidence": 0}.',
+    '- Si el mensaje habla de FIJAR UN PRESUPUESTO o LÍMITE (menciona "presupuesto", "límite", "limitá" o "tope"), NO es un gasto: devolvé {"amount": 0, "confidence": 0}.',
+    '- Si el mensaje habla de CREAR UNA CATEGORÍA ("creá la categoría gimnasio"), NO es un gasto: devolvé {"amount": 0, "confidence": 0}.',
+    '- No inventes montos ni comercios que no aparezcan en el mensaje.',
+    '- Interpretá los montos en formato local: "3.500,50" es 3500.50 y "3,500.50" es 3500.50.',
+    '- Si no se menciona el medio de pago, usá "other".',
+    `- Si dudás de la categoría, usá "${FALLBACK_CATEGORY_SLUG}".`,
+    '- No agregues texto fuera del JSON.',
+  ].join('\n');
+}
 
 export interface ParseExpenseInput {
   readonly text: string;
@@ -54,6 +78,12 @@ export interface ParseExpenseInput {
   readonly today?: string;
   /** Moneda del usuario, usada cuando el mensaje no la menciona. */
   readonly defaultCurrency?: string;
+  /**
+   * Slugs entre los que el modelo debe elegir. Se pasan las categorias reales
+   * del usuario (estandar + propias) para que "gasté 8000 en el gimnasio" caiga
+   * en su categoria de gimnasio y no en "varios".
+   */
+  readonly categorySlugs?: readonly string[];
 }
 
 /**
@@ -75,6 +105,11 @@ export async function parseExpenseFromText(
   }
   context.push(`Mensaje del usuario: "${input.text}"`);
 
+  const categorySlugs =
+    input.categorySlugs === undefined || input.categorySlugs.length === 0
+      ? STANDARD_CATEGORY_SLUGS
+      : input.categorySlugs;
+
   const content = await chatCompletion({
     provider: env.REASONING_PROVIDER,
     apiKey: env.REASONING_API_KEY,
@@ -83,7 +118,7 @@ export async function parseExpenseFromText(
     jsonObject: true,
     temperature: 0,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: buildSystemPrompt(categorySlugs) },
       { role: 'user', content: context.join('\n') },
     ],
   });

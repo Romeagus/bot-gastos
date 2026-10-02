@@ -10,6 +10,7 @@
 import type { Telegraf } from 'telegraf';
 import { registerAudioHandler } from './audio.handler.js';
 import { registerBudgetHandler } from './budget.handler.js';
+import { registerCategoryHandler } from './category.handler.js';
 import { registerHelpHandler } from './help.handler.js';
 import { registerPhotoHandler } from './photo.handler.js';
 import { registerStartHandler } from './start.handler.js';
@@ -20,6 +21,7 @@ export function registerHandlers(bot: Telegraf): void {
   registerStartHandler(bot);
   registerHelpHandler(bot);
   registerBudgetHandler(bot);
+  registerCategoryHandler(bot);
   registerTextHandler(bot);
   registerAudioHandler(bot);
   registerPhotoHandler(bot);

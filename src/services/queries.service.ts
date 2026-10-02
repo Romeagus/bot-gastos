@@ -11,17 +11,36 @@
 
 import { z } from 'zod';
 import { env } from '../config/env.js';
-import { listActiveForPeriod, upsertBudget } from '../db/repositories/budgets.repo.js';
-import { findSystemBySlug, listSystem } from '../db/repositories/categories.repo.js';
+import { upsertBudget } from '../db/repositories/budgets.repo.js';
+import { findForUserBySlug } from '../db/repositories/categories.repo.js';
 import { listRecentByUser, sumByCategory } from '../db/repositories/expenses.repo.js';
-import { STANDARD_CATEGORY_SLUGS } from '../domain/types/expense.js';
+import type { Category } from '../domain/types/category.js';
 import type { User } from '../domain/types/user.js';
-import { formatAmount } from '../utils/format.js';
+import { formatMoney } from '../utils/format.js';
 import { createLogger } from '../utils/logger.js';
-import { parseMoneyPhrase, resolveCategorySlug } from '../utils/nlp.js';
+import { parseMoneyPhrase, resolveCategorySlug, slugifyCategory } from '../utils/nlp.js';
 import { chatCompletion } from './ai/openai-compatible.client.js';
+import {
+  describeProgress,
+  formatBudgetReport,
+  getBudgetStatuses,
+  getBudgetStatusForCategory,
+  periodOf,
+} from './budgets.service.js';
+import { createUserCategory, listAvailableCategories } from './categories.service.js';
 
 const log = createLogger('service:queries');
+
+/** Mapa `categoryId` -> etiqueta visible ('🛒 Supermercado'), incluidas las propias. */
+async function categoryLabels(userId: string): Promise<Map<string, string>> {
+  const categories = await listAvailableCategories(userId);
+  return new Map(
+    categories.map((category) => [
+      category.id,
+      `${category.emoji ?? ''} ${category.name}`.trim(),
+    ]),
+  );
+}
 
 const PLAN_SCHEMA = z.object({
   intent: z
@@ -32,30 +51,40 @@ const PLAN_SCHEMA = z.object({
       'last_expenses',
       'budget_set',
       'budget_list',
+      'category_create',
+      'category_list',
       'capabilities',
       'unknown',
     ])
     .catch('unknown'),
-  // Se resuelve con nuestros alias ("super" -> supermercado, "nafta" -> transporte).
+  /**
+   * Categoria mencionada. Se normaliza en dos pasos: primero los alias
+   * ("super" -> supermercado) y, si no matchea, un slug libre que despues se
+   * resuelve contra las categorias REALES del usuario (propias incluidas).
+   */
   category: z
     .string()
-    .transform((value) => resolveCategorySlug(value))
+    .transform((value) => resolveCategorySlug(value) ?? slugifyCategory(value))
     .catch(null),
   // Monto TAL CUAL lo dijo el usuario: lo parseamos nosotros ("50 lucas" -> 50000).
   amount_text: z.string().trim().min(1).nullable().catch(null),
+  // Nombre de la categoria a crear, tal cual lo dijo ("gimnasio", "jardin").
+  category_name: z.string().trim().min(2).nullable().catch(null),
   period: z.enum(['today', 'this_month', 'last_month', 'this_year']).catch('this_month'),
 });
 
 export type QueryPlan = z.infer<typeof PLAN_SCHEMA>;
 
 const SYSTEM_PROMPT = [
-  'Sos el cerebro de un bot de gastos personales de Argentina.',
+  'Sos el cerebro de un bot de gastos personales de Argentina. Hablás relajado, en segunda persona ("vos").',
   'Clasificás el mensaje del usuario y devolvés SOLO un objeto JSON:',
   '{',
   '  "intent": "summary" | "category_total" | "top_categories" | "last_expenses" |',
-  '            "budget_set" | "budget_list" | "capabilities" | "unknown",',
-  '  "category": string | null,    // categoría o sinónimo tal como aparece ("super", "nafta", "luz")',
-  '  "amount_text": string | null, // solo si intent="budget_set": el monto tal cual lo dijo ("50 lucas", "50000")',
+  '            "budget_set" | "budget_list" | "category_create" | "category_list" |',
+  '            "capabilities" | "unknown",',
+  '  "category": string | null,      // categoría o sinónimo tal como aparece ("super", "nafta", "gimnasio")',
+  '  "amount_text": string | null,   // solo si intent="budget_set": el monto tal cual lo dijo ("50 lucas", "50000")',
+  '  "category_name": string | null, // solo si intent="category_create": el NOMBRE de la categoría nueva',
   '  "period": "today" | "this_month" | "last_month" | "this_year"',
   '}',
   '',
@@ -64,8 +93,10 @@ const SYSTEM_PROMPT = [
   '- "category_total": total de UNA categoría ("cuánto gasté en super").',
   '- "top_categories": en qué se fue la plata / ranking ("en qué gasté más").',
   '- "last_expenses": quiere ver movimientos ("mis últimos gastos", "qué cargué").',
-  '- "budget_set": quiere FIJAR un límite ("presupuesto de 50 lucas en super", "limitá el super a 50000").',
-  '- "budget_list": quiere VER sus límites ("mis presupuestos", "cuánto tengo de presupuesto").',
+  '- "budget_set": quiere FIJAR un límite ("presupuesto de 50 lucas en super").',
+  '- "budget_list": quiere VER sus límites ("mis presupuestos", "cuánto me queda de super").',
+  '- "category_create": quiere CREAR una categoría nueva ("creá la categoría gimnasio").',
+  '- "category_list": quiere VER sus categorías ("qué categorías tengo", "mis categorías").',
   '- "capabilities": saludo, agradecimiento o pregunta sobre el bot ("hola", "gracias", "qué podés hacer").',
   '- "unknown": cualquier otra cosa.',
   '',
@@ -102,7 +133,7 @@ function periodRange(period: QueryPlan['period'], now: Date): PeriodRange {
       return {
         from: new Date(Date.UTC(year, 0, 1)),
         to: new Date(Date.UTC(year + 1, 0, 1)),
-        label: 'este ano',
+        label: 'este año',
       };
     }
     case 'this_month':
@@ -148,16 +179,25 @@ async function buildPlan(text: string): Promise<QueryPlan> {
   const parsed = PLAN_SCHEMA.safeParse(safeJsonParse(content));
   return parsed.success
     ? parsed.data
-    : { intent: 'unknown', category: null, amount_text: null, period: 'this_month' };
+    : {
+        intent: 'unknown',
+        category: null,
+        amount_text: null,
+        category_name: null,
+        period: 'this_month',
+      };
 }
 
 /** Que sabe hacer el bot (para saludos y preguntas generales). */
 const CAPABILITIES = [
-  '¡Hola! Soy tu anotador de gastos. Podés:',
+  '¡Hola! 👋 Soy tu anotador de gastos. Te doy una mano con esto:',
   '',
-  '💸 Registrar: "gasté 3500 en el super", un audio o una foto del ticket.',
-  '📊 Consultar: "cuánto gasté este mes", "cuánto gasté en super", "en qué gasté más", "mis últimos gastos".',
-  '🎯 Presupuestar: "presupuesto de 50 lucas en super", "mis presupuestos".',
+  '💸 Anotar: "gasté 3500 en el super" · un audio 🎙️ · una foto del ticket 📸',
+  '📊 Ver: "cuánto gasté este mes" · "en qué gasté más" · "mis últimos gastos"',
+  '🎯 Topes: "presupuesto de 50 lucas en super" · "cómo vienen mis topes"',
+  '🏷️ Categorías: "creá la categoría gimnasio" · "qué categorías tengo"',
+  '',
+  'Y si me mandás un audio, también entiendo todo esto 😉',
 ].join('\n');
 
 /** Resumen del periodo + desglose por categoria. */
@@ -166,133 +206,180 @@ async function answerSummary(user: User, range: PeriodRange): Promise<string> {
   const total = totals.reduce((acc, row) => acc + row.total, 0);
 
   if (total === 0) {
-    return `No tenés gastos registrados ${range.label}.`;
+    return `Todavía no anotaste ningún gasto ${range.label} 🤷`;
   }
 
-  const categories = await listSystem();
-  const names = new Map(categories.map((category) => [category.id, category.name]));
+  const names = await categoryLabels(user.id);
   const detail = totals
     .map(
       (row) =>
-        `  • ${names.get(row.categoryId ?? '') ?? 'Sin categoría'}: ${formatAmount(row.total, row.currency)}`,
+        `  • ${names.get(row.categoryId ?? '') ?? 'Sin categoría'}: ${formatMoney(row.total, row.currency)}`,
     )
     .join('\n');
 
   return [
-    `Gastaste ${formatAmount(total, user.currency)} ${range.label}.`,
+    `💸 Gastaste ${formatMoney(total, user.currency)} ${range.label}.`,
     '',
-    'Por categoría:',
+    'Así se repartió:',
     detail,
   ].join('\n');
 }
 
 /** Total de una categoria puntual. */
 async function answerCategoryTotal(user: User, slug: string, range: PeriodRange): Promise<string> {
-  const category = await findSystemBySlug(slug);
+  const category = await findForUserBySlug(user.id, slug);
   if (category === null) {
-    return `No encontré la categoría "${slug}".`;
+    return `No tengo ninguna categoría "${slug}" 🤔 Si querés te la creo: "creá la categoría ${slug}".`;
   }
 
   const totals = await sumByCategory(user.id, range.from, range.to);
-  const total = totals.find((row) => row.categoryId === category.id)?.total ?? 0;
+  const total = totals
+    .filter((row) => row.categoryId === category.id)
+    .reduce((acc, row) => acc + row.total, 0);
   const label = `${category.emoji ?? ''} ${category.name}`.trim();
 
   return total === 0
-    ? `No registraste gastos en ${label} ${range.label}.`
-    : `Gastaste ${formatAmount(total, user.currency)} en ${label} ${range.label}.`;
+    ? `No anotaste gastos en ${label} ${range.label}.`
+    : `💸 Te gastaste ${formatMoney(total, user.currency)} en ${label} ${range.label}.`;
 }
 
 /** Ranking de categorias por gasto. */
 async function answerTopCategories(user: User, range: PeriodRange): Promise<string> {
   const totals = await sumByCategory(user.id, range.from, range.to);
   if (totals.length === 0) {
-    return `No tenés gastos registrados ${range.label}.`;
+    return `Todavía no anotaste ningún gasto ${range.label} 🤷`;
   }
 
-  const categories = await listSystem();
-  const names = new Map(categories.map((category) => [category.id, category.name]));
+  const names = await categoryLabels(user.id);
   const lines = totals
     .slice(0, 5)
     .map(
       (row, index) =>
-        `  ${index + 1}. ${names.get(row.categoryId ?? '') ?? 'Sin categoría'}: ${formatAmount(row.total, row.currency)}`,
+        `  ${index + 1}. ${names.get(row.categoryId ?? '') ?? 'Sin categoría'} · ${formatMoney(row.total, row.currency)}`,
     );
 
-  return [`En qué gastaste más ${range.label}:`, ...lines].join('\n');
+  return [`🏆 En qué se te fue la plata ${range.label}:`, ...lines].join('\n');
 }
 
 /** Ultimos movimientos registrados. */
 async function answerLastExpenses(user: User): Promise<string> {
   const expenses = await listRecentByUser(user.id, 5);
   if (expenses.length === 0) {
-    return 'Todavía no tenés gastos registrados.';
+    return 'Todavía no anotaste ningún gasto. Arrancá con "gasté 3500 en el super" 😉';
   }
 
-  const categories = await listSystem();
-  const names = new Map(categories.map((category) => [category.id, category.name]));
+  const names = await categoryLabels(user.id);
   const lines = expenses.map((expense) => {
     const date = expense.spentAt.toISOString().slice(5, 10).replace('-', '/');
     const label =
       expense.categoryId === null ? 'Sin categoría' : (names.get(expense.categoryId) ?? '?');
     const detail = expense.description ?? expense.merchant;
-    return `  • ${date}  ${formatAmount(expense.amount, expense.currency)}  ${label}${detail === null ? '' : ` · ${detail}`}`;
+    return `  • ${date} · ${formatMoney(expense.amount, expense.currency)} · ${label}${detail === null ? '' : ` (${detail})`}`;
   });
 
-  return ['Tus últimos gastos:', ...lines].join('\n');
+  return ['🧾 Tus últimos movimientos:', ...lines].join('\n');
 }
 
-/** Fija un presupuesto a partir de lenguaje natural. */
+/** Fija un tope a partir de lenguaje natural. */
 async function applyBudgetSet(user: User, plan: QueryPlan): Promise<string> {
   if (plan.category === null) {
-    return `¿Para qué categoría? Opciones: ${STANDARD_CATEGORY_SLUGS.join(', ')}.`;
+    const categories = await listAvailableCategories(user.id);
+    return [
+      '¿A qué categoría le pongo el tope?',
+      `Tengo: ${categories.map((category) => category.slug).join(', ')}.`,
+      'Y si te falta una, la creamos: "creá la categoría gimnasio".',
+    ].join('\n');
   }
 
   const amount = plan.amount_text === null ? null : parseMoneyPhrase(plan.amount_text);
   if (amount === null || amount <= 0) {
-    return 'No entendí el monto. Ejemplo: "presupuesto de 50 lucas en super".';
+    return 'No te entendí el monto 😅 Probá así: "presupuesto de 50 lucas en super".';
   }
 
-  const category = await findSystemBySlug(plan.category);
+  const category = await findForUserBySlug(user.id, plan.category);
   if (category === null) {
-    return `No encontré la categoría "${plan.category}".`;
+    return [
+      `No tengo ninguna categoría "${plan.category}" 🤔`,
+      `Si querés te la creo: "creá la categoría ${plan.category}".`,
+    ].join('\n');
   }
 
-  const now = new Date();
+  const { year, month } = periodOf(new Date());
   const budget = await upsertBudget({
     userId: user.id,
     categoryId: category.id,
-    periodYear: now.getUTCFullYear(),
-    periodMonth: now.getUTCMonth() + 1,
+    periodYear: year,
+    periodMonth: month,
     limitAmount: amount,
     currency: user.currency,
   });
 
   const label = `${category.emoji ?? ''} ${category.name}`.trim();
-  return [
-    `Listo: presupuesto de ${formatAmount(budget.limitAmount, budget.currency)} para ${label}.`,
-    `Te aviso al ${budget.alertThreshold}% y si lo superás.`,
-  ].join('\n');
+  const lines = [`🎯 Listo, tope de ${formatMoney(budget.limitAmount, budget.currency)} en ${label}.`];
+
+  // Si ya tenia gastos este mes en esa categoria se lo muestro al toque: asi ve
+  // que el tope cuenta desde el primer momento.
+  const status = await getBudgetStatusForCategory(user.id, category.id, year, month);
+  if (status !== null && status.spent > 0) {
+    lines.push(`Ojo que ya ${describeProgress(status)}.`);
+  }
+  lines.push(`Te aviso cuando llegues al ${budget.alertThreshold}% y si lo pasás.`);
+
+  return lines.join('\n');
 }
 
-/** Lista los presupuestos activos del mes. */
+/** Muestra como vienen los topes del mes: gastado, restante y porcentaje. */
 async function answerBudgetList(user: User): Promise<string> {
-  const now = new Date();
-  const budgets = await listActiveForPeriod(user.id, now.getUTCFullYear(), now.getUTCMonth() + 1);
-  if (budgets.length === 0) {
+  const { year, month } = periodOf(new Date());
+  const statuses = await getBudgetStatuses(user.id, year, month);
+
+  if (statuses.length === 0) {
     return [
-      'No tenés presupuestos para este mes.',
-      'Podés crearlos así: "presupuesto de 50 lucas en super".',
+      'Todavía no tenés topes para este mes 🤷',
+      '',
+      'Creá uno así: "presupuesto de 50 lucas en super".',
+      'Y si te falta la categoría: "creá la categoría gimnasio".',
     ].join('\n');
   }
 
-  const categories = await listSystem();
-  const names = new Map(categories.map((category) => [category.id, category.name]));
-  const lines = budgets.map(
-    (budget) =>
-      `  • ${names.get(budget.categoryId) ?? '?'}: ${formatAmount(budget.limitAmount, budget.currency)} (aviso al ${budget.alertThreshold}%)`,
-  );
+  return formatBudgetReport(statuses, 'este mes');
+}
 
-  return ['Presupuestos de este mes:', ...lines].join('\n');
+/** Crea una categoria propia a partir de lenguaje natural. */
+async function applyCategoryCreate(user: User, plan: QueryPlan): Promise<string> {
+  const name = plan.category_name ?? plan.category;
+  if (name === null) {
+    return '¿Cómo querés llamar la categoría? Ejemplo: "creá la categoría gimnasio".';
+  }
+
+  const result = await createUserCategory(user, name);
+  return result.message;
+}
+
+/** Lista las categorias disponibles para el usuario (estandar + propias). */
+async function answerCategoryList(user: User): Promise<string> {
+  const categories = await listAvailableCategories(user.id);
+  const own = categories.filter((category) => !category.isSystem);
+
+  const line = (category: Category): string => `  • ${category.emoji ?? '🏷️'} ${category.name}`;
+
+  const lines = ['🏷️ Tus categorías:', ''];
+  if (own.length > 0) {
+    lines.push('Tuyas:', ...own.map(line), '');
+  }
+  lines.push('Estándar:', ...categories.filter((c) => c.isSystem).map(line));
+  lines.push('', 'Podés crear más: "creá la categoría gimnasio".');
+
+  return lines.join('\n');
+}
+
+/** Respuesta cuando falta decir de que categoria se esta hablando. */
+async function answerMissingCategory(user: User): Promise<string> {
+  const categories = await listAvailableCategories(user.id);
+  return [
+    '¿De qué categoría hablamos? Tengo estas:',
+    categories.map((category) => `  • ${category.emoji ?? '🏷️'} ${category.name}`).join('\n'),
+  ].join('\n');
 }
 
 /**
@@ -315,7 +402,7 @@ export async function handleRequest(user: User, text: string): Promise<string | 
       return answerSummary(user, range);
     case 'category_total':
       return plan.category === null
-        ? `¿De qué categoría? Opciones: ${STANDARD_CATEGORY_SLUGS.join(', ')}.`
+        ? answerMissingCategory(user)
         : answerCategoryTotal(user, plan.category, range);
     case 'top_categories':
       return answerTopCategories(user, range);
@@ -325,6 +412,10 @@ export async function handleRequest(user: User, text: string): Promise<string | 
       return applyBudgetSet(user, plan);
     case 'budget_list':
       return answerBudgetList(user);
+    case 'category_create':
+      return applyCategoryCreate(user, plan);
+    case 'category_list':
+      return answerCategoryList(user);
     case 'capabilities':
       return CAPABILITIES;
     default:

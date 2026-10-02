@@ -15,8 +15,11 @@ import type { User } from '../../domain/types/user.js';
 import { upsertByTelegramId } from '../../db/repositories/users.repo.js';
 import { parseExpenseFromText } from '../../services/ai/reasoning.service.js';
 import { evaluateBudgetAlert } from '../../services/budgets.service.js';
+import { availableCategorySlugs } from '../../services/categories.service.js';
 import { createExpenseFromParsed } from '../../services/expenses.service.js';
-import { formatAmount } from '../../utils/format.js';
+import { handleRequest } from '../../services/queries.service.js';
+import { formatMoney } from '../../utils/format.js';
+import { isBudgetRequest, isCategoryRequest } from '../../utils/nlp.js';
 
 /** Da de alta o actualiza al usuario que envio el mensaje. */
 export async function resolveUser(ctx: Context): Promise<User | null> {
@@ -57,8 +60,8 @@ export async function replyExpense(
   });
 
   const label =
-    category === null ? 'Sin categoria' : `${category.emoji ?? ''} ${category.name}`.trim();
-  await ctx.reply(`Anote ${formatAmount(expense.amount, expense.currency)} en ${label}.`);
+    category === null ? 'Sin categoría' : `${category.emoji ?? ''} ${category.name}`.trim();
+  await ctx.reply(`✅ Listo, anoté ${formatMoney(expense.amount, expense.currency)} en ${label}`);
 
   // Alerta preventiva de presupuesto (si corresponde).
   const alert = await evaluateBudgetAlert(expense);
@@ -66,6 +69,56 @@ export async function replyExpense(
     await ctx.reply(alert);
   }
 }
+
+/**
+ * Rutea un texto libre (escrito o transcripto de un audio):
+ *   1. si es un gasto -> lo registra;
+ *   2. si no -> lo interpreta como consulta, presupuesto o categoria;
+ *   3. si no entiende nada -> pide que reformule.
+ *
+ * Es el punto de entrada comun de los handlers de texto y de audio, asi ambos
+ * canales entienden exactamente lo mismo.
+ */
+export async function handleFreeText(
+  ctx: Context,
+  user: User,
+  text: string,
+  sourceType: ExpenseSourceType,
+  telegramMessageId: number,
+  /** Texto transcripto: se muestra solo si NO pudimos interpretarlo (audio). */
+  heardText?: string,
+): Promise<void> {
+  // Un pedido de presupuesto o de categoria NO es un gasto, aunque mencione un
+  // monto o una categoria: lo resolvemos por el camino conversacional.
+  const isConversational = isBudgetRequest(text) || isCategoryRequest(text);
+
+  if (!isConversational) {
+    const registered = await logExpenseFromText(ctx, user, text, sourceType, telegramMessageId);
+    if (registered) {
+      return;
+    }
+  }
+
+  const answer = await handleRequest(user, text);
+  if (answer !== null) {
+    await ctx.reply(answer);
+    return;
+  }
+
+  await ctx.reply(
+    heardText === undefined ? UNKNOWN_TEXT : `🎙️ Te escuché: «${heardText}»\n\n${UNKNOWN_TEXT}`,
+  );
+}
+
+/** Respuesta cuando el mensaje no es ni un gasto ni algo que sepamos responder. */
+export const UNKNOWN_TEXT = [
+  'Mmm, no te entendí 🤔 Probá con algo de esto:',
+  '',
+  '• "gasté 3500 en el super"',
+  '• "cuánto gasté este mes"',
+  '• "presupuesto de 50 lucas en super"',
+  '• "creá la categoría gimnasio"',
+].join('\n');
 
 /**
  * Interpreta un texto y, si describe un gasto, lo registra y responde.
@@ -83,6 +136,9 @@ export async function logExpenseFromText(
     text,
     today: new Date().toISOString().slice(0, 10),
     defaultCurrency: user.currency,
+    // Se le ofrecen al modelo las categorias reales del usuario (incluidas las
+    // propias) para que clasifique solo con opciones que existen.
+    categorySlugs: await availableCategorySlugs(user.id),
   });
 
   if (parsed === null) {

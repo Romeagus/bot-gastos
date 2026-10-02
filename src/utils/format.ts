@@ -4,12 +4,21 @@
  * Archivo : src/utils/format.ts
  */
 
-/** Formatea un monto con separador de miles y 2 decimales (formato es-AR). */
-export function formatAmount(amount: number, currency: string): string {
-  const formatted = new Intl.NumberFormat('es-AR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
+/**
+ * Formatea un monto para el chat: separador de miles es-AR y SIN decimales.
+ * Es a proposito mas coloquial y legible que un `ARS 20.000,00`:
+ *   ('ARS', 20000)  -> '$20.000'
+ *   ('USD', 1500.5) -> 'US$1.501'
+ */
+export function formatMoney(amount: number, currency: string): string {
+  const formatted = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(amount);
+
+  if (currency === 'ARS') {
+    return `$${formatted}`;
+  }
+  if (currency === 'USD') {
+    return `US$${formatted}`;
+  }
   return `${currency} ${formatted}`;
 }
 

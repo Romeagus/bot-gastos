@@ -10,11 +10,7 @@
  */
 
 import { z } from 'zod';
-import {
-  FALLBACK_CATEGORY_SLUG,
-  PAYMENT_METHODS,
-  STANDARD_CATEGORY_SLUGS,
-} from '../types/expense.js';
+import { FALLBACK_CATEGORY_SLUG, PAYMENT_METHODS } from '../types/expense.js';
 
 export const parsedExpenseSchema = z.object({
   /** Monto total, siempre positivo. Unico campo sin valor de fallback. */
@@ -26,10 +22,17 @@ export const parsedExpenseSchema = z.object({
     .pipe(z.string().length(3))
     .catch('ARS'),
 
+  /**
+   * Slug de categoria. NO se restringe al catalogo estandar: el usuario puede
+   * crear categorias propias ("gimnasio", "peluqueria"), y `expenses.service`
+   * las resuelve contra las categorias reales del usuario. Si el slug no
+   * existe, cae a `varios`. Solo se valida el FORMATO (el DDL exige
+   * `^[a-z0-9_]+$` para `categories.slug`).
+   */
   category_slug: z
     .string()
     .transform((value) => value.trim().toLowerCase())
-    .pipe(z.enum(STANDARD_CATEGORY_SLUGS))
+    .pipe(z.string().regex(/^[a-z0-9_]{2,40}$/))
     .catch(FALLBACK_CATEGORY_SLUG),
 
   merchant: z.string().trim().min(1).nullable().catch(null),

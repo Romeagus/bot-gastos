@@ -7,20 +7,27 @@
 import type { Telegraf } from 'telegraf';
 
 export const HELP_TEXT = [
-  'Soy tu anotador de gastos. Podes registrarlos asi:',
+  'Soy tu anotador de gastos 🧾 Te cuento cómo usarme:',
   '',
-  '✍️ Escribiendo: "gaste 3500 en el super"',
-  '🎙️ Mandando una nota de voz',
-  '📸 Sacandole una foto a un ticket',
+  '💸 Para anotar un gasto:',
+  '  "gasté 3500 en el super" · "pagué 5000 de luz" · "cargué 20 lucas de nafta"',
+  '  O mandame un audio o una foto del ticket y lo saco yo.',
   '',
-  'Y preguntarme cosas como:',
-  '❓ "cuanto gaste este mes"',
-  '❓ "cuanto gaste en supermercado"',
+  '📊 Para preguntarme:',
+  '  "cuánto gasté este mes" · "cuánto gasté en super"',
+  '  "en qué gasté más" · "mis últimos gastos"',
+  '',
+  '🎯 Para poner topes:',
+  '  "presupuesto de 50 lucas en super" · "cómo vienen mis topes"',
+  '',
+  '🏷️ Para armar tus propias categorías:',
+  '  "creá la categoría gimnasio" · "qué categorías tengo"',
   '',
   'Comandos:',
-  '/start - registrar tu usuario',
-  '/help - esta ayuda',
-  '/presupuesto - ver o fijar presupuestos',
+  '  /start       - arrancamos',
+  '  /presupuesto - ver o fijar topes',
+  '  /categoria   - ver o crear categorías',
+  '  /help        - esta ayuda',
 ].join('\n');
 
 /** Registra el comando /help. */

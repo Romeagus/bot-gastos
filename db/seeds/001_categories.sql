@@ -16,6 +16,7 @@ VALUES
   ('supermercado', 'Supermercado', '🛒', TRUE, NULL),
   ('transporte',   'Transporte',   '🚕', TRUE, NULL),
   ('servicios',    'Servicios',    '💡', TRUE, NULL),
+  ('peluqueria',   'Peluquería',   '💇', TRUE, NULL),
   ('varios',       'Varios',       '🧾', TRUE, NULL)
 ON CONFLICT DO NOTHING;
 

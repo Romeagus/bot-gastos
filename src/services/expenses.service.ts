@@ -8,7 +8,7 @@
  * directamente a los repositorios de gastos.
  */
 
-import { findSystemBySlug } from '../db/repositories/categories.repo.js';
+import { findForUserBySlug } from '../db/repositories/categories.repo.js';
 import { createExpense } from '../db/repositories/expenses.repo.js';
 import type { ParsedExpense } from '../domain/schemas/parsed-expense.schema.js';
 import type { Category } from '../domain/types/category.js';
@@ -38,13 +38,17 @@ export interface CreatedExpense {
   readonly category: Category | null;
 }
 
-/** Resuelve el slug a una categoria real, con `varios` como ultimo recurso. */
-async function resolveCategory(slug: string): Promise<Category | null> {
-  const category = await findSystemBySlug(slug);
+/**
+ * Resuelve el slug a una categoria real (estandar o propia del usuario), con
+ * `varios` como ultimo recurso. Tiene en cuenta las categorias personalizadas:
+ * un gasto en "peluqueria" se guarda en la categoria del usuario si existe.
+ */
+async function resolveCategory(userId: string, slug: string): Promise<Category | null> {
+  const category = await findForUserBySlug(userId, slug);
   if (category !== null) {
     return category;
   }
-  return findSystemBySlug(FALLBACK_CATEGORY_SLUG);
+  return findForUserBySlug(userId, FALLBACK_CATEGORY_SLUG);
 }
 
 /**
@@ -52,7 +56,7 @@ async function resolveCategory(slug: string): Promise<Category | null> {
  * El monto ya viene validado y normalizado por el esquema zod.
  */
 export async function createExpenseFromParsed(input: BuildExpenseInput): Promise<CreatedExpense> {
-  const category = await resolveCategory(input.parsed.category_slug);
+  const category = await resolveCategory(input.user.id, input.parsed.category_slug);
 
   const spentAt =
     input.parsed.spent_at !== null && input.parsed.spent_at !== undefined

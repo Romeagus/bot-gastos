@@ -68,12 +68,61 @@ const CATEGORY_ALIASES: Record<string, StandardCategorySlug> = {
   expensas: 'servicios',
   abl: 'servicios',
   monotributo: 'servicios',
+  // peluqueria
+  peluqueria: 'peluqueria',
+  peluquerias: 'peluqueria',
+  peluquero: 'peluqueria',
+  peluquera: 'peluqueria',
+  barberia: 'peluqueria',
+  barber: 'peluqueria',
+  barbero: 'peluqueria',
   // varios
   varios: 'varios',
   otro: 'varios',
   otros: 'varios',
   misc: 'varios',
 };
+
+/**
+ * Emoji por defecto para una categoria propia, segun su nombre.
+ * Si no hay coincidencia se usa `DEFAULT_CATEGORY_EMOJI`.
+ */
+const CATEGORY_EMOJIS: Record<string, string> = {
+  peluqueria: '💇',
+  barberia: '💈',
+  unas: '💅',
+  estetica: '💅',
+  belleza: '💅',
+  gimnasio: '🏋️',
+  gym: '🏋️',
+  deporte: '⚽',
+  salud: '🏥',
+  farmacia: '💊',
+  medico: '🩺',
+  obra_social: '🩺',
+  educacion: '📚',
+  curso: '📚',
+  libros: '📚',
+  ropa: '👕',
+  indumentaria: '👕',
+  calzado: '👟',
+  hogar: '🏠',
+  muebles: '🛋️',
+  ferreteria: '🔧',
+  herramientas: '🔧',
+  jardin: '🌱',
+  mascotas: '🐾',
+  mascota: '🐾',
+  regalos: '🎁',
+  viajes: '✈️',
+  vacaciones: '✈️',
+  tecnologia: '💻',
+  electronica: '💻',
+  juegos: '🎮',
+};
+
+/** Emoji generico cuando no reconocemos la categoria. */
+export const DEFAULT_CATEGORY_EMOJI = '🏷️';
 
 /** Quita acentos, pasa a minusculas y colapsa espacios. */
 function normalize(text: string): string {
@@ -116,6 +165,80 @@ export function resolveCategorySlug(input: string): StandardCategorySlug | null 
  */
 export function isBudgetRequest(input: string): boolean {
   return /(presupuesto|presupuestar|limite|limitar|tope|budget)/.test(normalize(input));
+}
+
+/**
+ * Detecta si el mensaje pide CREAR una categoria propia.
+ * Ej: "crea una categoria peluqueria", "agrega la categoria gimnasio".
+ *
+ * Se usa para NO interpretar el pedido como un gasto (menciona un monto o un
+ * nombre que el extractor podria confundir).
+ */
+export function isCategoryRequest(input: string): boolean {
+  const text = normalize(input);
+  if (!/\bcategorias?\b/.test(text)) {
+    return false;
+  }
+  // "mis categorias", "que categorias tengo" son consultas, no altas.
+  if (/\bmis\b|cuales|tengo/.test(text)) {
+    return false;
+  }
+  return /(crea|crear|creo|agrega|agregar|suma|sumar|nueva|nuevo|alta|armar)/.test(text);
+}
+
+/**
+ * Convierte un nombre libre en un slug valido para `categories.slug`.
+ * El DDL exige `^[a-z0-9_]+$`, por eso se quitan acentos y simbolos.
+ * "Peluquería y Estética!" -> "peluqueria_y_estetica"
+ */
+export function slugifyCategory(input: string): string | null {
+  const slug = normalize(input)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
+    .replace(/_+$/, '');
+  return slug === '' ? null : slug;
+}
+
+/** Conectores que van en minuscula salvo que inicien el nombre. */
+const LOWERCASE_WORDS = new Set([
+  'y',
+  'e',
+  'o',
+  'u',
+  'de',
+  'del',
+  'la',
+  'el',
+  'los',
+  'las',
+  'con',
+  'para',
+  'en',
+]);
+
+/** Da formato de titulo: 'peluqueria y estetica' -> 'Peluqueria y Estetica'. */
+export function prettifyCategoryName(input: string): string {
+  return input
+    .trim()
+    .split(/\s+/)
+    .map((word, index) => {
+      if (word === '') {
+        return word;
+      }
+      const lower = word.toLowerCase();
+      if (index > 0 && LOWERCASE_WORDS.has(lower)) {
+        return lower;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
+}
+
+/** Emoji sugerido para una categoria propia, segun su nombre ('gimnasio' -> '🏋️'). */
+export function emojiForCategory(name: string): string {
+  const key = slugifyCategory(name);
+  return key === null ? DEFAULT_CATEGORY_EMOJI : (CATEGORY_EMOJIS[key] ?? DEFAULT_CATEGORY_EMOJI);
 }
 
 /** Multiplicadores de la jerga local. */

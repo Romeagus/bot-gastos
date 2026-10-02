@@ -3,27 +3,45 @@
 Asistente financiero conversacional para Telegram. Elimina la fricción del
 registro financiero diario mediante:
 
-1. **Registro por audio** — se transcribe (Groq / Whisper) y se normaliza a JSON.
-2. **Registro por foto** — tickets/comprobantes extraídos con un modelo de visión (Qwen2.5-VL).
-3. **Alertas preventivas** — avisos proactivos de presupuesto mensual por categoría.
-4. **Consultas en lenguaje natural** — preguntas sobre los consumos registrados.
+1. **Registro por texto, audio o foto** — el texto y el audio se interpretan
+   (Groq) y el ticket se extrae con un modelo de visión (Qwen2.5-VL).
+2. **Consultas en lenguaje natural** — "cuánto gasté este mes", "en qué gasté más".
+3. **Topes por categoría con avance** — límite mensual, cuánto llevás gastado y
+   cuánto te queda.
+4. **Alertas preventivas** — te avisa al cruzar el umbral y te lo recuerda en
+   cada gasto mientras sigas cerca o pasado del tope.
+5. **Categorías propias** — creá las tuyas ("gimnasio", "jardín") y usalas tanto
+   para anotar gastos como para ponerles un tope.
 
-> Estado actual: **MVP funcional en construcción.** Ya funcionan el esquema de
-> base de datos, el registro de gastos por **texto** y por **audio**
-> (transcripción + estructuración a JSON) y la capa de IA. Pendientes: registro
-> por foto (visión), alertas de presupuesto y consultas en lenguaje natural.
+> Estado actual: **MVP funcional.** Registro (texto / audio / foto), consultas,
+> topes con alertas y categorías propias funcionan de punta a punta. La lectura
+> de tickets necesita `OPENROUTER_API_KEY`.
+
+### Cómo se usa
+
+| Querés…             | Decí o mandá                                                           |
+| ------------------- | ---------------------------------------------------------------------- |
+| Anotar un gasto     | `gasté 3500 en el super` · `cargué 20 lucas de nafta` · un audio 🎙️    |
+| Anotar un ticket    | una foto del ticket 📸                                                 |
+| Consultar           | `cuánto gasté este mes` · `cuánto gasté en super` · `en qué gasté más` |
+| Ver tus topes       | `cómo vienen mis topes`                                                |
+| Fijar un tope       | `presupuesto de 50 lucas en super`                                     |
+| Crear una categoría | `creá la categoría gimnasio`                                           |
+
+**Todo esto funciona igual por texto que por audio.** Comandos disponibles:
+`/start`, `/help`, `/presupuesto`, `/categoria`.
 
 ## Stack
 
-| Capa              | Tecnología                                   |
-| ----------------- | -------------------------------------------- |
-| Runtime           | Node.js (ESM) + TypeScript estricto          |
-| Framework del bot | Telegraf                                     |
-| Base de datos     | PostgreSQL (Supabase / Neon)                 |
-| Acceso a datos    | SQL directo tipado con `pg`                  |
-| Transcripción     | Groq API — `whisper-large-v3`                |
-| Visión / tickets  | OpenRouter — `qwen/qwen-2.5-vl-72b-instruct` |
-| Razonamiento      | API compatible con OpenAI (Groq / DeepSeek)  |
+| Capa              | Tecnología                                  |
+| ----------------- | ------------------------------------------- |
+| Runtime           | Node.js (ESM) + TypeScript estricto         |
+| Framework del bot | Telegraf                                    |
+| Base de datos     | PostgreSQL (Supabase / Neon)                |
+| Acceso a datos    | SQL directo tipado con `pg`                 |
+| Transcripción     | Groq API — `whisper-large-v3`               |
+| Visión / tickets  | OpenRouter — `qwen/qwen2.5-vl-72b-instruct` |
+| Razonamiento      | API compatible con OpenAI (Groq / DeepSeek) |
 
 Los proveedores de IA exponen una API compatible con OpenAI, por lo que se
 consumen con `fetch` nativo (Node 18+) en lugar de sumar SDKs.

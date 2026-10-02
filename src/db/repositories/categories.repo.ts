@@ -89,6 +89,29 @@ export async function findSystemBySlug(slug: string): Promise<Category | null> {
 }
 
 /**
+ * Resuelve una categoría visible para el usuario: primero busca una propia con
+ * ese slug y, si no existe, cae a la estándar. Así el usuario puede "pisar" el
+ * nombre de una categoría del sistema con la suya sin ambigüedad.
+ */
+export async function findForUserBySlug(userId: string, slug: string): Promise<Category | null> {
+  const { rows } = await query<CategoryRow>(
+    `SELECT ${CATEGORY_COLUMNS}
+       FROM categories
+      WHERE slug = $2 AND (user_id = $1 OR user_id IS NULL)
+      ORDER BY (user_id IS NOT NULL) DESC
+      LIMIT 1`,
+    [userId, slug],
+  );
+  const row = rows[0];
+  return row === undefined ? null : toCategory(row);
+}
+
+/** Indica si el usuario ya tiene (o el sistema ya define) ese slug. */
+export async function slugExistsForUser(userId: string, slug: string): Promise<boolean> {
+  return (await findForUserBySlug(userId, slug)) !== null;
+}
+
+/**
  * Crea una categoría personalizada de un usuario.
  * `is_system` se fija en FALSE: la restricción `categories_scope_chk` exige que
  * una categoría con dueño no sea de sistema.
