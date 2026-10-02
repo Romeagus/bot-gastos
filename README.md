@@ -82,16 +82,17 @@ npm run dev          # levanta el bot en modo watch (tsx)
 
 ### Scripts disponibles
 
-| Script              | Descripción                                           |
-| ------------------- | ----------------------------------------------------- |
-| `npm run dev`       | Ejecuta el bot con recarga en caliente (`tsx watch`). |
-| `npm run build`     | Compila TypeScript a `dist/`.                         |
-| `npm run start`     | Ejecuta la build (`node dist/index.js`).              |
-| `npm run typecheck` | Chequeo de tipos sin emitir.                          |
-| `npm run db:apply`  | Aplica `db/schema.sql` y los seeds.                   |
-| `npm run db:verify` | Verifica esquema y repositorios contra la base real.  |
-| `npm run lint`      | ESLint.                                               |
-| `npm run format`    | Prettier.                                             |
+| Script                  | Descripción                                           |
+| ----------------------- | ----------------------------------------------------- |
+| `npm run dev`           | Ejecuta el bot con recarga en caliente (`tsx watch`). |
+| `npm run build`         | Compila TypeScript a `dist/`.                         |
+| `npm run start`         | Ejecuta la build (`node dist/index.js`).              |
+| `npm run typecheck`     | Chequeo de tipos sin emitir.                          |
+| `npm run db:apply`      | Aplica `db/schema.sql` y los seeds.                   |
+| `npm run db:verify`     | Verifica esquema y repositorios contra la base real.  |
+| `npm run ai:transcribe` | Prueba la transcripción de audio (Groq Whisper).      |
+| `npm run lint`          | ESLint.                                               |
+| `npm run format`        | Prettier.                                             |
 
 ### Aplicar el esquema sin Node
 

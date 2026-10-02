@@ -37,14 +37,18 @@ export function registerStartHandler(bot: Telegraf): void {
 
     await ctx.reply(
       [
-        `Hola ${user.firstName ?? ''}! 👋`,
+        `¡Hola ${user.firstName ?? ''}! 👋 Soy tu anotador de gastos.`,
         '',
-        'Soy tu anotador de gastos inteligente. Muy pronto vas a poder:',
-        '🎙️ Mandarme un audio y lo registro',
-        '📸 Sacarle una foto a un ticket',
-        '✍️ Escribirme "gaste 3500 en el super"',
+        '💸 Registrar:',
+        '  "gasté 3500 en el super"  ·  un audio  ·  una foto del ticket',
         '',
-        `Moneda: ${user.currency} - Zona horaria: ${user.timezone}`,
+        '📊 Consultar:',
+        '  "cuánto gasté este mes"  ·  "en qué gasté más"  ·  "mis últimos gastos"',
+        '',
+        '🎯 Presupuestar:',
+        '  "presupuesto de 50 lucas en super"  ·  "mis presupuestos"',
+        '',
+        `Moneda: ${user.currency} · Zona horaria: ${user.timezone}`,
       ].join('\n'),
     );
   });

@@ -18,7 +18,11 @@ const log = createLogger('ai:transcription');
 export interface TranscribeAudioInput {
   /** Bytes del audio (ej. `await ctx.telegram.getFileLink()` + fetch, o buffer). */
   readonly audio: Uint8Array;
-  /** Nombre con extension; Whisper infiere el formato de aca (ej. 'voz.oga'). */
+  /**
+   * Nombre con extension. Groq valida el formato por esta extension (no por el
+   * contenido), asi que tiene que estar en su allowlist:
+   * [flac mp3 mp4 mpeg mpga m4a ogg opus wav webm]. Ej. 'voz.ogg' para Telegram.
+   */
   readonly filename: string;
   readonly mimeType?: string;
   /** Codigo ISO-639-1 para mejorar la precision (ej. 'es'). */

@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.scripts.json",
     "db:apply": "tsx scripts/apply-schema.ts",
     "db:verify": "tsx scripts/verify-db.ts",
+    "ai:transcribe": "tsx scripts/test-transcription.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\" \"*.{json,md}\""
