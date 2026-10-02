@@ -271,3 +271,43 @@ export async function sumByCategory(
     total: Number(row.total),
   }));
 }
+
+interface PeriodCountRow extends QueryResultRow {
+  count: string;
+  total: string;
+  currency: string;
+}
+
+/**
+ * Cantidad de movimientos y monto total en un rango, agrupado por moneda.
+ *
+ * Es lo que necesita el resumen semanal: la cantidad de gastos no se puede
+ * deducir de `sumByCategory` (esa agrupa por categoria y una misma categoria puede
+ * tener muchos movimientos). Se agrupa por moneda para NO sumar ARS con USD: en
+ * una tabla mezclada eso daria un numero sin sentido.
+ *
+ * Mismo criterio que el resto de la app: se excluyen los gastos `rejected`
+ * (borrados logicamente).
+ */
+export async function summarizePeriod(
+  userId: string,
+  from: Date,
+  to: Date,
+): Promise<{ count: number; total: number; currency: string }[]> {
+  const { rows } = await query<PeriodCountRow>(
+    `SELECT currency, COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total
+       FROM expenses
+      WHERE user_id = $1
+        AND spent_at >= $2
+        AND spent_at < $3
+        AND status <> 'rejected'
+      GROUP BY currency`,
+    [userId, from, to],
+  );
+
+  return rows.map((row) => ({
+    count: Number(row.count),
+    total: Number(row.total),
+    currency: row.currency,
+  }));
+}

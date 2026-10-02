@@ -10,7 +10,9 @@
 import type { QueryResultRow } from 'pg';
 import { query } from '../client.js';
 import type { TelegramUserInput, User } from '../../domain/types/user.js';
+import { createLogger } from '../../utils/logger.js';
 
+const log = createLogger('repo:users');
 /** Fila cruda de `users` tal como la devuelve PostgreSQL. */
 interface UserRow extends QueryResultRow {
   id: string;
@@ -92,4 +94,29 @@ export async function upsertByTelegramId(input: TelegramUserInput): Promise<User
   );
 
   return toUserOrThrow(rows[0]);
+}
+
+
+/**
+ * Lista los usuarios activos, para los jobs programados (resumen semanal).
+ *
+ * Se filtra por `is_active` para que un usuario que se dio de baja (o que
+ * bloqueo el bot) deje de recibir mensajes proactivos.
+ */
+export async function listActive(): Promise<User[]> {
+  const { rows } = await query<UserRow>(
+    `SELECT ${USER_COLUMNS} FROM users WHERE is_active ORDER BY created_at ASC`,
+  );
+  return rows.map(toUser);
+}
+
+/**
+ * Activa o desactiva a un usuario.
+ *
+ * Lo usa el job del resumen semanal cuando Telegram responde 403 (el usuario
+ * bloqueo el bot): asi deja de intentar mandarle mensajes proactivos.
+ */
+export async function updateActive(userId: string, isActive: boolean): Promise<void> {
+  await query(`UPDATE users SET is_active = $2 WHERE id = $1`, [userId, isActive]);
+  log.info('Usuario actualizado', { userId, isActive });
 }

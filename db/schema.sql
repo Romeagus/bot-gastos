@@ -213,6 +213,36 @@ CREATE INDEX IF NOT EXISTS budgets_category_id_idx
   ON budgets (category_id);
 
 -- =============================================================================
+-- Tabla: scheduled_reports
+-- -----------------------------------------------------------------------------
+-- Registro de los reportes programados ya enviados (ej. el resumen semanal).
+--
+-- Por que existe: Railway reinicia el contenedor seguido y el proceso vive en
+-- memoria, asi que un flag "ya mande el resumen de esta semana" SE PIERDE en cada
+-- redeploy. Con esta tabla el envio es idempotente entre reinicios: la clave
+-- unica (job_name, period_key) impide mandar dos veces el mismo reporte.
+--
+-- `period_key` identifica el periodo del reporte en texto libre ('2026-W42'), de
+-- modo que agregar otro job no requiere cambiar el esquema.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS scheduled_reports (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  job_name    TEXT        NOT NULL,
+  period_key  TEXT        NOT NULL,
+  sent_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT scheduled_reports_user_job_period_key UNIQUE (user_id, job_name, period_key)
+);
+
+COMMENT ON TABLE  scheduled_reports             IS 'Reportes programados ya enviados, para no repetir tras un reinicio.';
+COMMENT ON COLUMN scheduled_reports.period_key  IS 'Identificador del periodo del reporte (ej. 2026-W42).';
+
+-- Consulta del job: "mandaste ya el resumen de la semana 42 a este usuario?".
+CREATE INDEX IF NOT EXISTS scheduled_reports_lookup_idx
+  ON scheduled_reports (job_name, period_key);
+
+-- =============================================================================
 -- Triggers: mantenimiento automático de updated_at.
 -- =============================================================================
 DROP TRIGGER IF EXISTS users_set_updated_at ON users;

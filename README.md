@@ -18,6 +18,8 @@ registro financiero diario mediante:
    monto parece dudoso, el gasto queda pendiente y te lo confirmás con botones.
 8. **Borrar y editar** — `/borrar` y `/editar` te listan tus últimos gastos con
    botones: vos elegís cuál tocar, el bot nunca adivina.
+9. **Resumen semanal automático** — todos los lunes a las 10:00 (hora de Argentina)
+   te escribe cómo viene el mes y cómo están tus topes, sin que tengas que pedirlo.
 
 > Estado actual: **MVP funcional.** Registro (texto / audio / foto), consultas,
 > topes con alertas, categorías propias, varias instrucciones por mensaje, borrado
@@ -38,10 +40,45 @@ registro financiero diario mediante:
 | Crear una categoría | `creá la categoría gimnasio`                                           |
 | Borrar un gasto     | `/borrar` (te lista los últimos con botones) · `borrá el último`       |
 | Corregir un gasto   | `/editar` (elegís el gasto y el campo: monto o categoría)              |
+| Ver el resumen      | `/resumen` (o esperás al lunes y te lo manda solo)                     |
 | Empezar de cero     | `/reset` (borra todo pidiendo confirmación)                            |
 
 **Todo esto funciona igual por texto que por audio.** Comandos disponibles:
-`/start`, `/help`, `/presupuesto`, `/categoria`, `/borrar`, `/editar`, `/reset`.
+`/start`, `/help`, `/resumen`, `/presupuesto`, `/categoria`, `/borrar`, `/editar`,
+`/reset`.
+
+### El resumen semanal
+
+Todos los **lunes a las 10:00** (hora de Argentina) el bot te escribe solo:
+
+```
+🌞 Buen día! Así viene tu mes 👇
+
+💸 Octubre: $246.500 en 11 movimientos
+
+🏆 En qué se fue:
+  1. 💡 Servicios · $80.000
+  2. 🍔 Comida · $67.000
+  3. 🏋️ Gimnasio · $50.000
+
+🎯 Topes:
+  🚨 🛒 Supermercado: te pasaste por $18.500 (1950%)
+  ⚠️ 💡 Servicios: vas 80%, te quedan $20.000
+
+Mandame un audio o un ticket y lo anoto 😉
+```
+
+Tres detalles que importan:
+
+- **No se manda si no hay nada que contar**: si no anotaste nada en el mes, no
+  llega un mensaje vacío.
+- **Nunca se duplica**: el envío se registra con la clave de la semana ISO
+  (`2026-W41`) en la tabla `scheduled_reports`. Si Railway reinicia el contenedor
+  justo a las 10:00, el resumen no se manda dos veces.
+- **Usa tu zona horaria**: sale a las 10:00 de tu hora local (la tabla `users`
+  tiene `timezone`), no a la del servidor.
+
+Si bloqueás el bot, el sistema te da de baja solo y deja de mandarte mensajes.
 
 ### Cuando no te entiende
 
@@ -89,6 +126,8 @@ bot-gastos/
 │  │  ├─ middlewares/            # auth por usuario, logging, manejo de errores
 │  │  ├─ pending-edit.ts         # edición en curso (expira a los 5 min)
 │  │  └─ keyboards/              # (reservado)
+│  ├─ jobs/
+│  │  └─ weekly-report.job.ts    # resumen semanal (lunes 10:00, zona del usuario)
 │  ├─ services/
 │  │  ├─ ai/
 │  │  │  ├─ transcription.service.ts   # Groq / Whisper
@@ -101,6 +140,7 @@ bot-gastos/
 │  │  ├─ budgets.service.ts      # topes, avance y alertas
 │  │  ├─ categories.service.ts   # resolución de categorías (alias + propias)
 │  │  ├─ queries.service.ts      # consultas en lenguaje natural
+│  │  ├─ weekly-report.service.ts# texto del resumen semanal (lo usa /resumen)
 │  │  └─ answer.ts               # respuesta (texto + botones) sin Telegraf
 │  ├─ db/
 │  │  ├─ client.ts               # Pool de conexiones (pg)
@@ -108,8 +148,7 @@ bot-gastos/
 │  ├─ domain/
 │  │  ├─ types/                  # tipos y DTOs del dominio
 │  │  └─ schemas/                # esquemas zod (validación de salidas de IA)
-│  ├─ jobs/                      # (reservado para tareas programadas)
-│  └─ utils/                     # logger, errores, nlp, formato de dinero/fechas
+│  └─ utils/                     # logger, errores, nlp, dinero/fechas, agenda
 ├─ tests/                        # tests unitarios (node:test + tsx, sin DB)
 ├─ .env.example
 ├─ eslint.config.js

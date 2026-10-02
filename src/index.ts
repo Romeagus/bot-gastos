@@ -14,6 +14,7 @@ import { createBot } from './bot/bot.js';
 import { registerHandlers } from './bot/handlers/index.js';
 import { env } from './config/env.js';
 import { closePool, getDatabaseHost, pingDatabase } from './db/client.js';
+import { startWeeklyReportJob } from './jobs/weekly-report.job.js';
 import { createLogger } from './utils/logger.js';
 
 const log = createLogger('app');
@@ -40,6 +41,9 @@ async function main(): Promise<void> {
   const bot = createBot();
   registerHandlers(bot);
 
+  // Resumen semanal (lunes 10:00). Se apaga con el resto en el shutdown.
+  const stopWeeklyReportJob = startWeeklyReportJob(bot);
+
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) {
       return;
@@ -47,6 +51,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     log.info(`Recibida senal ${signal}: apagando...`);
 
+    stopWeeklyReportJob();
     bot.stop(signal);
     await closePool();
 
@@ -59,11 +64,17 @@ async function main(): Promise<void> {
   const me = await bot.telegram.getMe();
   log.info(`Bot autenticado como @${me.username ?? '(sin username)'}`, { botId: me.id });
 
-  // Menu de comandos nativo de Telegram.
+  // Menu de comandos nativo de Telegram. Se listan TODOS: el menu es la puerta de
+  // entrada al bot para alguien que todavia no conoce los comandos.
   await bot.telegram.setMyCommands([
     { command: 'start', description: 'Registrar tu usuario' },
     { command: 'help', description: 'Como usar el bot' },
+    { command: 'resumen', description: 'Resumen de como viene el mes' },
     { command: 'presupuesto', description: 'Ver o fijar presupuestos' },
+    { command: 'categoria', description: 'Ver o crear categorias' },
+    { command: 'borrar', description: 'Borrar un gasto' },
+    { command: 'editar', description: 'Corregir un gasto' },
+    { command: 'reset', description: 'Empezar de cero' },
   ]);
 
   // Telegram admite UNA sola instancia por token. Durante un redeploy el

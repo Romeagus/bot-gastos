@@ -16,6 +16,7 @@ import { registerHelpHandler } from './help.handler.js';
 import { registerManageHandler } from './manage.handler.js';
 import { registerPhotoHandler } from './photo.handler.js';
 import { registerStartHandler } from './start.handler.js';
+import { registerSummaryHandler } from './summary.handler.js';
 import { registerTextHandler } from './text.handler.js';
 
 /** Registra todos los handlers del bot. */
@@ -26,6 +27,7 @@ export function registerHandlers(bot: Telegraf): void {
   registerCategoryHandler(bot);
   registerConfirmHandler(bot);
   registerManageHandler(bot);
+  registerSummaryHandler(bot);
   registerTextHandler(bot);
   registerAudioHandler(bot);
   registerPhotoHandler(bot);

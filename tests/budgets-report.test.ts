@@ -92,3 +92,14 @@ test('la barra se satura en 10 bloques aunque el porcentaje pase de 100', () => 
   assert.match(report, /▓{10}/);
   assert.doesNotMatch(report, /▓{11}/);
 });
+
+test('el excedente se calcula como gastado menos limite, no con el restante', () => {
+  // Regresion: el resumen semanal usaba `Math.abs(remaining)`, pero `remaining`
+  // viene con `Math.max(0, ...)` y por lo tanto NUNCA es negativo. Eso hacia que
+  // al pasarse del tope dijera siempre "te pasaste por $0 (1950%)".
+  // El excedente real es `spent - limitAmount`, igual que usa `describeProgress`.
+  const pasado = status(1000, 19500);
+  assert.equal(pasado.remaining, 0, 'el restante queda Saturado en 0 por diseño');
+  assert.equal(pasado.spent - pasado.budget.limitAmount, 18500);
+  assert.match(describeProgress(pasado), /te pasaste por \$18\.500/);
+});

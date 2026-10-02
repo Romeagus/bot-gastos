@@ -51,8 +51,14 @@ export function periodOf(date: Date): { year: number; month: number } {
   return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
 }
 
-/** Rango [inicio, fin) del mes de una fecha, en UTC. */
-function monthRange(date: Date): { from: Date; to: Date } {
+/**
+ * Rango [inicio, fin) del mes de una fecha, en UTC.
+ *
+ * Se exporta porque el resumen semanal necesita exactamente el mismo corte que
+ * las alertas de presupuesto: si cada uno calculara el mes por su cuenta, un
+ * gasto del dia 31 podria contarse en un reporte y no en el otro.
+ */
+export function monthRange(date: Date): { from: Date; to: Date } {
   const { year, month } = periodOf(date);
   return {
     from: new Date(Date.UTC(year, month - 1, 1)),
