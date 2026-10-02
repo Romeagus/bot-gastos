@@ -28,12 +28,30 @@ const envSchema = z.object({
     .min(1, 'TELEGRAM_BOT_TOKEN no puede estar vacío (ver .env.example).'),
 
   // --- Base de datos (Supabase / Neon) ---------------------------------------
+  // Se normaliza el valor porque los paneles (Railway, etc.) suelen pegar la URL
+  // con comillas o saltos de linea, lo que rompia la validacion.
   DATABASE_URL: z
     .string()
-    .min(1, 'DATABASE_URL no puede estar vacío (ver .env.example).')
-    .refine(
-      (value) => /^postgres(ql)?:\/\//.test(value),
-      'DATABASE_URL debe ser una cadena de conexión PostgreSQL (postgres:// o postgresql://).',
+    .transform((value) => value.replace(/\s+/g, '').replace(/^["']+|["']+$/g, ''))
+    .pipe(
+      z.string().superRefine((value, ctx) => {
+        if (value === '') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'DATABASE_URL no puede estar vacío (ver .env.example).',
+          });
+          return;
+        }
+        if (!/^postgres(ql)?:\/\//i.test(value)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              'DATABASE_URL debe empezar con postgres:// o postgresql://. Lo recibido empieza con: "' +
+              value.slice(0, 12) +
+              '"',
+          });
+        }
+      }),
     ),
   // TLS de la conexión: true por defecto (Supabase/Neon lo requieren).
   // Para un Postgres local sin TLS, usar DATABASE_SSL=false.
