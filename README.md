@@ -161,3 +161,32 @@ Telegram permite **un único consumidor de long polling** por token. Si dejás e
 bot corriendo en tu PC **y** en el servidor al mismo tiempo, se "roban" los
 updates entre sí y vas a ver errores `409 Conflict`. Para probar desde el
 celular, **apagá el proceso local** (`Ctrl+C`).
+
+## Solución de problemas
+
+### `connect ENETUNREACH <ipv6>:5432` al conectar a la base
+
+Supabase publica registros **A (IPv4) y AAAA (IPv6)** para `db.<ref>.supabase.co`.
+Muchos hosts (Railway, Render) **no tienen salida IPv6**, así que el intento por
+IPv6 falla con _Network unreachable_. La app ya fuerza la preferencia por IPv4
+(`setDefaultResultOrder('ipv4first')` en `src/db/client.ts`).
+
+Si aun así falla, lo más robusto es usar la cadena del **pooler** de Supabase
+(pensada justamente para hosts efímeros):
+
+```
+postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+```
+
+Se obtiene en Supabase → **Project Settings → Database → Connection string →
+_Session pooler_**. El puerto `6543` (_Transaction pooler_) también sirve.
+
+### `409 Conflict: terminated by other getUpdates request`
+
+Hay **dos procesos** haciendo long polling con el mismo token. Apagá el local
+(`Ctrl+C`) o eliminá el servicio duplicado en Railway.
+
+### `EnvValidationError: DATABASE_URL debe empezar con postgres://...`
+
+El valor tiene comillas, espacios, o el bloque `KEY=` pegado adentro del valor.
+El mensaje de error indica los primeros caracteres recibidos para ubicarlo rápido.
