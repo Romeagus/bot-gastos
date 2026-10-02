@@ -32,6 +32,17 @@ export async function listAvailableCategories(userId: string): Promise<Category[
   return listForUser(userId);
 }
 
+/** Mapa `categoryId` -> etiqueta visible ('🛒 Supermercado'), propias incluidas. */
+export async function categoryLabelMap(userId: string): Promise<Map<string, string>> {
+  const categories = await listForUser(userId);
+  return new Map(
+    categories.map((category) => [
+      category.id,
+      `${category.emoji ?? ''} ${category.name}`.trim(),
+    ]),
+  );
+}
+
 /**
  * Slugs con los que la IA puede clasificar un gasto de este usuario.
  * Incluye las categorias propias: asi "gasté 8000 en el gimnasio" puede caer

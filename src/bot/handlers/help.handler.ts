@@ -27,6 +27,8 @@ export const HELP_TEXT = [
   '  /start       - arrancamos',
   '  /presupuesto - ver o fijar topes',
   '  /categoria   - ver o crear categorías',
+  '  /borrar      - borrar un gasto',
+  '  /reset       - empezar de cero',
   '  /help        - esta ayuda',
 ].join('\n');
 

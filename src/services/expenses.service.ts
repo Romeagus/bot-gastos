@@ -12,6 +12,9 @@ import { findForUserBySlug } from '../db/repositories/categories.repo.js';
 import {
   createExpense,
   findById,
+  listRecentByUser,
+  rejectAllForUser,
+  summarizeForUser,
   updateStatusForUser,
 } from '../db/repositories/expenses.repo.js';
 import type { ParsedExpense } from '../domain/schemas/parsed-expense.schema.js';
@@ -151,4 +154,70 @@ export async function rejectExpense(
   expenseId: string,
 ): Promise<StatusChangeResult> {
   return changePendingStatus(userId, expenseId, 'rejected');
+}
+
+export interface DeleteResult {
+  readonly deleted: boolean;
+  readonly expense: Expense | null;
+  /** Explicacion cuando no se pudo borrar (para responderle al usuario). */
+  readonly reason?: string;
+}
+
+/**
+ * "Borra" un gasto: lo pasa a `rejected`, que es el borrado logico del dominio.
+ *
+ * A diferencia de `rejectExpense` (que solo resuelve gastos PENDIENTES del flujo
+ * de ticket), esta funciona sobre cualquier gasto vigente: es la accion de
+ * "me equivoque, sacalo" pedida desde el chat.
+ *
+ * Se prefiere el borrado logico a un DELETE: no se destruyen datos del usuario y
+ * el gasto igual desaparece de totales, topes y listados.
+ */
+export async function deleteExpense(userId: string, expenseId: string): Promise<DeleteResult> {
+  const expense = await findById(expenseId);
+
+  // El chequeo de dueno es de seguridad: nadie borra gastos ajenos.
+  if (expense === null || expense.userId !== userId) {
+    return { deleted: false, expense: null, reason: 'No encontré ese gasto.' };
+  }
+
+  if (expense.status === 'rejected') {
+    return { deleted: false, expense, reason: 'Ese gasto ya estaba borrado.' };
+  }
+
+  const updated = await updateStatusForUser(userId, expenseId, 'rejected');
+  return updated === null
+    ? { deleted: false, expense, reason: 'No pude borrar el gasto.' }
+    : { deleted: true, expense: updated };
+}
+
+/** Borra el gasto mas reciente ("borrá el último"). */
+export async function deleteMostRecentExpense(userId: string): Promise<DeleteResult> {
+  const recent = await listRecentByUser(userId, 1);
+  const last = recent[0];
+
+  if (last === undefined) {
+    return { deleted: false, expense: null, reason: 'No tenés ningún gasto para borrar.' };
+  }
+
+  return deleteExpense(userId, last.id);
+}
+
+/** Borra TODOS los gastos vigentes del usuario. @returns cuantos se borraron. */
+export async function clearAllExpenses(userId: string): Promise<number> {
+  const count = await rejectAllForUser(userId);
+  log.info('Gastos borrados en bloque', { userId, count });
+  return count;
+}
+
+/** Ultimos gastos vigentes, para los listados y los menus del chat. */
+export async function listRecentExpenses(userId: string, limit = 5): Promise<Expense[]> {
+  return listRecentByUser(userId, limit);
+}
+
+/** Cantidad y monto total de los gastos vigentes. */
+export async function getExpenseSummary(
+  userId: string,
+): Promise<{ count: number; total: number }> {
+  return summarizeForUser(userId);
 }

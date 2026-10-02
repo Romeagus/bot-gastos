@@ -34,7 +34,7 @@ import {
   type PaymentMethod,
 } from '../../domain/types/expense.js';
 import { AppError } from '../../utils/errors.js';
-import { parseAmount } from '../../utils/format.js';
+import { parseMoneyText } from '../../utils/format.js';
 import { createLogger } from '../../utils/logger.js';
 import { resolveCategorySlug, slugifyCategory } from '../../utils/nlp.js';
 import { chatCompletion } from './openai-compatible.client.js';
@@ -117,24 +117,6 @@ export interface ExtractExpenseFromImageInput {
 
 /** Payload crudo del modelo, antes de normalizar. */
 type RawVisionExpense = Readonly<Record<string, unknown>>;
-
-/**
- * Interpreta el monto a partir del texto del ticket.
- *
- * `parseAmount` asume formato es-AR (el punto separa miles), salvo que el texto
- * tenga el patron inequivoco del formato ingles ("1,234" o "1,234.56"), que se
- * detecta aparte para no equivocarse por un factor de 1000.
- */
-function parseMoneyText(value: string): number | null {
-  const text = value.replace(/[^\d.,]/g, '').trim();
-  if (text === '') {
-    return null;
-  }
-  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(text)) {
-    return Number(text.replace(/,/g, ''));
-  }
-  return parseAmount(text);
-}
 
 /** Clave de comparacion: minusculas, sin acentos y con '_' en lugar de espacios. */
 function normalizeKey(value: string): string {

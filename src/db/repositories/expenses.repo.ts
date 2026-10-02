@@ -143,12 +143,52 @@ export async function updateStatusForUser(
   return row === undefined ? null : toExpense(row);
 }
 
-/** Ultimos gastos de un usuario, del mas reciente al mas antiguo. */
+/**
+ * Marca como descartados TODOS los gastos vigentes del usuario.
+ *
+ * Se usa el estado `rejected` en lugar de un DELETE real: el "borrado" queda
+ * reversible en la base y desaparece de todos los calculos y listados (que ya
+ * excluyen ese estado), asi que para el usuario es indistinguible de borrar.
+ *
+ * @returns Cuantos gastos se descartaron.
+ */
+export async function rejectAllForUser(userId: string): Promise<number> {
+  const result = await query(
+    `UPDATE expenses
+        SET status = 'rejected'
+      WHERE user_id = $1 AND status <> 'rejected'`,
+    [userId],
+  );
+  return result.rowCount ?? 0;
+}
+
+interface ExpenseSummaryRow extends QueryResultRow {
+  count: string;
+  total: string;
+}
+
+/** Cantidad y monto total de los gastos vigentes (los descartados no cuentan). */
+export async function summarizeForUser(
+  userId: string,
+): Promise<{ count: number; total: number }> {
+  const { rows } = await query<ExpenseSummaryRow>(
+    `SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total
+       FROM expenses
+      WHERE user_id = $1 AND status <> 'rejected'`,
+    [userId],
+  );
+
+  const row = rows[0];
+  return { count: Number(row?.count ?? 0), total: Number(row?.total ?? 0) };
+}
+
+/** Ultimos gastos vigentes de un usuario, del mas reciente al mas antiguo. */
 export async function listRecentByUser(userId: string, limit = 10): Promise<Expense[]> {
   const { rows } = await query<ExpenseRow>(
     `SELECT ${EXPENSE_COLUMNS}
        FROM expenses
       WHERE user_id = $1
+        AND status <> 'rejected'
       ORDER BY spent_at DESC, created_at DESC
       LIMIT $2`,
     [userId, limit],

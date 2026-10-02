@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "outDir": "./.tsbuild/tests"
+  },
+  "include": ["tests/**/*.ts"],
+  "//": "Se pisa el 'exclude' del config base: alli se excluye tests/ a proposito (no debe ir al build), pero este config existe justamente para typechequearlos.",
+  "exclude": ["node_modules", "dist"]
+}

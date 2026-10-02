@@ -13,6 +13,7 @@ import { registerBudgetHandler } from './budget.handler.js';
 import { registerCategoryHandler } from './category.handler.js';
 import { registerConfirmHandler } from './confirm.handler.js';
 import { registerHelpHandler } from './help.handler.js';
+import { registerManageHandler } from './manage.handler.js';
 import { registerPhotoHandler } from './photo.handler.js';
 import { registerStartHandler } from './start.handler.js';
 import { registerTextHandler } from './text.handler.js';
@@ -24,6 +25,7 @@ export function registerHandlers(bot: Telegraf): void {
   registerBudgetHandler(bot);
   registerCategoryHandler(bot);
   registerConfirmHandler(bot);
+  registerManageHandler(bot);
   registerTextHandler(bot);
   registerAudioHandler(bot);
   registerPhotoHandler(bot);

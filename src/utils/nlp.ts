@@ -161,15 +161,33 @@ function isStandardSlug(value: string): value is StandardCategorySlug {
 }
 
 /**
+ * Quita los prefijos y articulos que acompanan a la categoria en el lenguaje
+ * natural: "en el super", "del supermercado", "para la peluqueria".
+ *
+ * Se repite hasta que el texto deja de cambiar porque los prefijos pueden venir
+ * encadenados ("en el super" necesita sacar "en " y despues "el ").
+ */
+function stripCategoryPrefixes(value: string): string {
+  let result = value;
+  let previous = '';
+  while (result !== previous) {
+    previous = result;
+    result = result.replace(/^(de|del|en|el|la|los|las|para|mi|mis)\s+/, '');
+  }
+  return result;
+}
+
+/**
  * Resuelve un texto libre al slug de categoria estandar.
- * Acepta el slug exacto y alias ("super" -> supermercado, "nafta" -> transporte).
+ * Acepta el slug exacto y alias ("super" -> supermercado, "nafta" -> transporte),
+ * con o sin articulos ("en el super" -> supermercado).
  */
 export function resolveCategorySlug(input: string): StandardCategorySlug | null {
   const key = normalize(input);
   if (key === '') {
     return null;
   }
-  const bare = key.replace(/^(de|del|en|para|la|el)\s+/, '');
+  const bare = stripCategoryPrefixes(key);
   if (isStandardSlug(bare)) {
     return bare;
   }
@@ -184,9 +202,12 @@ export function resolveCategorySlug(input: string): StandardCategorySlug | null 
  * Necesario para resolver la ambiguedad: "presupuesto de 50 lucas en super"
  * tambien contiene un monto y una categoria, y el extractor de gastos lo
  * confundiria con un gasto.
+ *
+ * Se matchea por raiz ("limit" cubre limite, limitar, limitá, limita) porque el
+ * usuario escribe la orden de muchas formas.
  */
 export function isBudgetRequest(input: string): boolean {
-  return /(presupuesto|presupuestar|limite|limitar|tope|budget)/.test(normalize(input));
+  return /\b(presupuest|limit|tope|budget)/.test(normalize(input));
 }
 
 /**

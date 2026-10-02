@@ -27,10 +27,13 @@ registro financiero diario mediante:
 | Consultar           | `cuánto gasté este mes` · `cuánto gasté en super` · `en qué gasté más` |
 | Ver tus topes       | `cómo vienen mis topes`                                                |
 | Fijar un tope       | `presupuesto de 50 lucas en super`                                     |
+| Borrar un tope      | `borrá el tope de super`                                               |
 | Crear una categoría | `creá la categoría gimnasio`                                           |
+| Borrar un gasto     | `/borrar` (te lista los últimos con botones) · `borrá el último`       |
+| Empezar de cero     | `/reset` (borra todo pidiendo confirmación)                            |
 
 **Todo esto funciona igual por texto que por audio.** Comandos disponibles:
-`/start`, `/help`, `/presupuesto`, `/categoria`.
+`/start`, `/help`, `/presupuesto`, `/categoria`, `/borrar`, `/reset`.
 
 ## Stack
 
@@ -107,11 +110,25 @@ npm run dev          # levanta el bot en modo watch (tsx)
 | `npm run build`         | Compila TypeScript a `dist/`.                         |
 | `npm run start`         | Ejecuta la build (`node dist/index.js`).              |
 | `npm run typecheck`     | Chequeo de tipos sin emitir.                          |
+| `npm test`              | Tests unitarios (runner nativo de Node).              |
 | `npm run db:apply`      | Aplica `db/schema.sql` y los seeds.                   |
 | `npm run db:verify`     | Verifica esquema y repositorios contra la base real.  |
 | `npm run ai:transcribe` | Prueba la transcripción de audio (Groq Whisper).      |
 | `npm run lint`          | ESLint.                                               |
 | `npm run format`        | Prettier.                                             |
+
+### Tests
+
+```bash
+npm test
+```
+
+Corren con el runner nativo de Node (`node:test`) vía `tsx`: **sin dependencias
+extra y sin base de datos** (solo lógica pura). Cubren los puntos que ya dieron
+problemas una vez: el parseo de montos (`19.000` no es `19`), los alias de
+categorías con artículos ("en el super" → supermercado), las variantes de
+"limitar", el contrato tolerante de la salida de la IA y el texto del reporte de
+presupuestos.
 
 ### Aplicar el esquema sin Node
 

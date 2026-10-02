@@ -17,7 +17,12 @@
  * Limitacion conocida: el periodo se calcula en UTC (ignora `users.timezone`).
  */
 
-import { findActiveForCategory, listActiveForPeriod } from '../db/repositories/budgets.repo.js';
+import {
+  deactivateAllForUser,
+  deactivateForCategory,
+  findActiveForCategory,
+  listActiveForPeriod,
+} from '../db/repositories/budgets.repo.js';
 import { findById as findCategoryById, listForUser } from '../db/repositories/categories.repo.js';
 import { sumByCategory } from '../db/repositories/expenses.repo.js';
 import type { Budget } from '../domain/types/budget.js';
@@ -234,4 +239,25 @@ export async function evaluateBudgetAlert(expense: Expense): Promise<string | nu
 
   // Todavia va tranquilo: no se dice nada.
   return null;
+}
+
+/**
+ * Borra el tope de una categoria en un periodo (borrado logico: se desactiva).
+ *
+ * @returns `true` si habia un tope activo y se borro.
+ */
+export async function deleteBudgetForCategory(
+  userId: string,
+  categoryId: string,
+  year: number,
+  month: number,
+): Promise<boolean> {
+  return deactivateForCategory(userId, categoryId, year, month);
+}
+
+/** Borra TODOS los topes del usuario. @returns cuantos se borraron. */
+export async function clearAllBudgets(userId: string): Promise<number> {
+  const count = await deactivateAllForUser(userId);
+  log.info('Topes borrados en bloque', { userId, count });
+  return count;
 }

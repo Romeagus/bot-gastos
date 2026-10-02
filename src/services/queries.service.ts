@@ -16,31 +16,27 @@ import { findForUserBySlug } from '../db/repositories/categories.repo.js';
 import { listRecentByUser, sumByCategory } from '../db/repositories/expenses.repo.js';
 import type { Category } from '../domain/types/category.js';
 import type { User } from '../domain/types/user.js';
-import { formatMoney } from '../utils/format.js';
+import { formatMoney, formatShortDate } from '../utils/format.js';
 import { createLogger } from '../utils/logger.js';
 import { parseMoneyPhrase, resolveCategorySlug, slugifyCategory } from '../utils/nlp.js';
 import { chatCompletion } from './ai/openai-compatible.client.js';
 import {
+  deleteBudgetForCategory,
   describeProgress,
   formatBudgetReport,
   getBudgetStatuses,
   getBudgetStatusForCategory,
   periodOf,
 } from './budgets.service.js';
-import { createUserCategory, listAvailableCategories } from './categories.service.js';
+import { deleteMostRecentExpense } from './expenses.service.js';
+// Se importa con alias para no tocar los usos internos de este modulo.
+import {
+  categoryLabelMap as categoryLabels,
+  createUserCategory,
+  listAvailableCategories,
+} from './categories.service.js';
 
 const log = createLogger('service:queries');
-
-/** Mapa `categoryId` -> etiqueta visible ('🛒 Supermercado'), incluidas las propias. */
-async function categoryLabels(userId: string): Promise<Map<string, string>> {
-  const categories = await listAvailableCategories(userId);
-  return new Map(
-    categories.map((category) => [
-      category.id,
-      `${category.emoji ?? ''} ${category.name}`.trim(),
-    ]),
-  );
-}
 
 const PLAN_SCHEMA = z.object({
   intent: z
@@ -49,7 +45,10 @@ const PLAN_SCHEMA = z.object({
       'category_total',
       'top_categories',
       'last_expenses',
+      'expense_delete_last',
+      'expense_clear',
       'budget_set',
+      'budget_delete',
       'budget_list',
       'category_create',
       'category_list',
@@ -80,8 +79,9 @@ const SYSTEM_PROMPT = [
   'Clasificás el mensaje del usuario y devolvés SOLO un objeto JSON:',
   '{',
   '  "intent": "summary" | "category_total" | "top_categories" | "last_expenses" |',
-  '            "budget_set" | "budget_list" | "category_create" | "category_list" |',
-  '            "capabilities" | "unknown",',
+  '            "expense_delete_last" | "expense_clear" |',
+  '            "budget_set" | "budget_delete" | "budget_list" |',
+  '            "category_create" | "category_list" | "capabilities" | "unknown",',
   '  "category": string | null,      // categoría o sinónimo tal como aparece ("super", "nafta", "gimnasio")',
   '  "amount_text": string | null,   // solo si intent="budget_set": el monto tal cual lo dijo ("50 lucas", "50000")',
   '  "category_name": string | null, // solo si intent="category_create": el NOMBRE de la categoría nueva',
@@ -93,7 +93,10 @@ const SYSTEM_PROMPT = [
   '- "category_total": total de UNA categoría ("cuánto gasté en super").',
   '- "top_categories": en qué se fue la plata / ranking ("en qué gasté más").',
   '- "last_expenses": quiere ver movimientos ("mis últimos gastos", "qué cargué").',
+  '- "expense_delete_last": quiere BORRAR el último gasto ("borrá el último", "eliminá el último que anoté").',
+  '- "expense_clear": quiere borrar TODOS sus gastos ("borrá todo", "quiero empezar de cero").',
   '- "budget_set": quiere FIJAR un límite ("presupuesto de 50 lucas en super").',
+  '- "budget_delete": quiere BORRAR un tope ("borrá el tope de super", "sacá el presupuesto de nafta").',
   '- "budget_list": quiere VER sus límites ("mis presupuestos", "cuánto me queda de super").',
   '- "category_create": quiere CREAR una categoría nueva ("creá la categoría gimnasio").',
   '- "category_list": quiere VER sus categorías ("qué categorías tengo", "mis categorías").',
@@ -270,7 +273,7 @@ async function answerLastExpenses(user: User): Promise<string> {
 
   const names = await categoryLabels(user.id);
   const lines = expenses.map((expense) => {
-    const date = expense.spentAt.toISOString().slice(5, 10).replace('-', '/');
+    const date = formatShortDate(expense.spentAt);
     const label =
       expense.categoryId === null ? 'Sin categoría' : (names.get(expense.categoryId) ?? '?');
     const detail = expense.description ?? expense.merchant;
@@ -382,6 +385,53 @@ async function answerMissingCategory(user: User): Promise<string> {
   ].join('\n');
 }
 
+/** Borra el gasto mas reciente ("borrá el último"). */
+async function applyDeleteLastExpense(user: User): Promise<string> {
+  const result = await deleteMostRecentExpense(user.id);
+
+  if (!result.deleted || result.expense === null) {
+    return result.reason ?? 'No pude borrar el último gasto.';
+  }
+
+  const expense = result.expense;
+  return `🗑️ Listo, borré ${formatMoney(expense.amount, expense.currency)} del ${formatShortDate(expense.spentAt)}.`;
+}
+
+/**
+ * El usuario pidio borrar TODO: se lo deriva al comando `/reset`.
+ *
+ * Un pedido de esta magnitud no debe depender de que el clasificador haya
+ * entendido bien el mensaje: se hace por comando y con confirmacion por botones,
+ * nunca a partir de un texto suelto.
+ */
+function answerClearExpenses(): string {
+  return [
+    '⚠️ Para borrar todo quiero que me lo confirmes con un botón.',
+    '',
+    'Escribí /reset y te muestro las opciones.',
+  ].join('\n');
+}
+
+/** Borra el tope de una categoria. */
+async function applyBudgetDelete(user: User, plan: QueryPlan): Promise<string> {
+  if (plan.category === null) {
+    return answerMissingCategory(user);
+  }
+
+  const category = await findForUserBySlug(user.id, plan.category);
+  if (category === null) {
+    return `No tengo ninguna categoría "${plan.category}" 🤔`;
+  }
+
+  const { year, month } = periodOf(new Date());
+  const deleted = await deleteBudgetForCategory(user.id, category.id, year, month);
+  const label = `${category.emoji ?? ''} ${category.name}`.trim();
+
+  return deleted
+    ? `🧹 Listo, borré el tope de ${label}.`
+    : `No tenías ningún tope en ${label} este mes.`;
+}
+
 /**
  * Interpreta un mensaje que NO es un gasto y devuelve la respuesta.
  *
@@ -408,8 +458,14 @@ export async function handleRequest(user: User, text: string): Promise<string | 
       return answerTopCategories(user, range);
     case 'last_expenses':
       return answerLastExpenses(user);
+    case 'expense_delete_last':
+      return applyDeleteLastExpense(user);
+    case 'expense_clear':
+      return answerClearExpenses();
     case 'budget_set':
       return applyBudgetSet(user, plan);
+    case 'budget_delete':
+      return applyBudgetDelete(user, plan);
     case 'budget_list':
       return answerBudgetList(user);
     case 'category_create':

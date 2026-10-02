@@ -127,3 +127,37 @@ export async function listActiveForPeriod(
 
   return rows.map(toBudget);
 }
+
+/**
+ * Desactiva un presupuesto puntual (borrado logico: la fila queda por si se
+ * quiere recuperar, pero deja de contar para las alertas y los reportes).
+ *
+ * @returns `true` si habia un presupuesto activo y se desactivo.
+ */
+export async function deactivateForCategory(
+  userId: string,
+  categoryId: string,
+  periodYear: number,
+  periodMonth: number,
+): Promise<boolean> {
+  const result = await query(
+    `UPDATE budgets
+        SET is_active = FALSE
+      WHERE user_id = $1
+        AND category_id = $2
+        AND period_year = $3
+        AND period_month = $4
+        AND is_active`,
+    [userId, categoryId, periodYear, periodMonth],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** Desactiva todos los presupuestos del usuario. @returns cuantos se desactivaron. */
+export async function deactivateAllForUser(userId: string): Promise<number> {
+  const result = await query(
+    `UPDATE budgets SET is_active = FALSE WHERE user_id = $1 AND is_active`,
+    [userId],
+  );
+  return result.rowCount ?? 0;
+}
