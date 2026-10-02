@@ -166,13 +166,15 @@ celular, **apagá el proceso local** (`Ctrl+C`).
 
 ### `connect ENETUNREACH <ipv6>:5432` al conectar a la base
 
-Supabase publica registros **A (IPv4) y AAAA (IPv6)** para `db.<ref>.supabase.co`.
-Muchos hosts (Railway, Render) **no tienen salida IPv6**, así que el intento por
-IPv6 falla con _Network unreachable_. La app ya fuerza la preferencia por IPv4
-(`setDefaultResultOrder('ipv4first')` en `src/db/client.ts`).
+**Causa real (proyectos nuevos de Supabase):** la conexión _directa_
+`db.<ref>.supabase.co` publica **solo registros AAAA (IPv6)**, no tiene IPv4.
+Como muchos hosts (Railway, Render) no tienen salida IPv6, la conexión falla con
+_Network unreachable_. Preferir IPv4 no ayuda porque **no hay IPv4 para elegir**
+(`setDefaultResultOrder('ipv4first')` queda igual como defensa).
 
-Si aun así falla, lo más robusto es usar la cadena del **pooler** de Supabase
-(pensada justamente para hosts efímeros):
+**Solución:** usar la **Connection Pooler** de Supabase, que sí resuelve por IPv4.
+Respecto de la cadena directa cambian dos cosas: el usuario pasa a ser
+`postgres.<ref>` (antes `postgres`) y el host pasa a `aws-0-<region>.pooler.supabase.com`:
 
 ```
 postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
