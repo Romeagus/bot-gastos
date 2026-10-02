@@ -13,7 +13,7 @@
 import { createBot } from './bot/bot.js';
 import { registerHandlers } from './bot/handlers/index.js';
 import { env } from './config/env.js';
-import { closePool, pingDatabase } from './db/client.js';
+import { closePool, getDatabaseHost, pingDatabase } from './db/client.js';
 import { createLogger } from './utils/logger.js';
 
 const log = createLogger('app');
@@ -21,7 +21,18 @@ const log = createLogger('app');
 let shuttingDown = false;
 
 async function main(): Promise<void> {
-  log.info('Arrancando bot-gastos', { nodeEnv: env.NODE_ENV });
+  const dbHost = getDatabaseHost();
+  log.info('Arrancando bot-gastos', { nodeEnv: env.NODE_ENV, dbHost });
+
+  // Diagnostico preventivo: la conexion directa de Supabase es IPv6-only y
+  // muchos hosts (Railway, Render) no rutean IPv6 -> "ENETUNREACH".
+  if (/^db\..*\.supabase\.co$/i.test(dbHost)) {
+    log.warn(
+      'DATABASE_URL apunta a la conexion DIRECTA de Supabase (IPv6-only). ' +
+        'Si el host no tiene salida IPv6, usar el pooler: ' +
+        'aws-0-<region>.pooler.supabase.com (y el usuario postgres.<ref>).',
+    );
+  }
 
   await pingDatabase();
   log.info('Conexion a PostgreSQL verificada');

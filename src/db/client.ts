@@ -120,3 +120,16 @@ export async function closePool(): Promise<void> {
     await current.end();
   }
 }
+
+/**
+ * Host de la base (sin usuario ni contrasena), para diagnosticos.
+ * Se loguea al arrancar: permite ver en el acto a que servidor se esta
+ * conectando el bot sin exponer credenciales.
+ */
+export function getDatabaseHost(): string {
+  try {
+    return new URL(env.DATABASE_URL).host;
+  } catch {
+    return '(DATABASE_URL invalida)';
+  }
+}
